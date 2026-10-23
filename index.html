@@ -1016,6 +1016,17 @@ function act(pid, a){
     case 'unmort': if(!turn) return 'Solo podés levantar una hipoteca durante tu turno.'; if(!canUnmort(pid,i)) return 'No te alcanza para levantar la hipoteca.';
       S.props[i].m=false; p.money-=unmortCost(i); log(`${p.name} levanta la hipoteca de ${B[i].n} (${fmt(unmortCost(i))}).`); break;
     case 'bankrupt': goBankrupt(p); break;
+    case 'handoffOffer': {   // ceder mi lugar a un observador (él decide si acepta)
+      if(pid===S.hostPid) return 'El anfitrión no puede ceder su lugar: la partida funciona desde su dispositivo.';
+      const o=(S.observers||[]).find(x=>x.id===a.to);
+      if(!o || !o.conn) return 'Ese observador ya no está conectado.';
+      if(S.handoff) return 'Ya hay una oferta de lugar esperando respuesta.';
+      S.handoff={from:pid, to:o.id, at:Date.now()};
+      sysChat(`🔁 ${p.name} le ofrece su lugar en la partida a ${o.name}.`); break;
+    }
+    case 'handoffCancel':
+      if(!S.handoff || S.handoff.from!==pid) return;
+      sysChat(`${p.name} canceló la oferta de su lugar.`); S.handoff=null; break;
     case 'retire': {   // dejar de jugar antes de tiempo
       if((S.rent && (S.rent.from===pid || S.rent.to===pid)) || (S.payQ||[]).some(q=>q.from===pid || q.to===pid))
         return 'Terminá primero el pago que está en curso.';
@@ -1300,13 +1311,35 @@ function hostOnData(conn, d){
   }
   const pid=conn.pid; if(!pid) return;
   const ob=(S.observers||[]).find(o=>o.id===pid);
-  if(ob){   // los observadores solo pueden prender o apagar su micrófono (y chatear)
+  if(ob){   // los observadores solo pueden prender o apagar su micrófono, chatear y responder si les ceden un lugar
     if(d.t==='act' && d.a && d.a.type==='mic'){ ob.mic=!!d.a.on; commit(); }
+    else if(d.t==='act' && d.a && (d.a.type==='handoffAccept' || d.a.type==='handoffReject')) answerHandoff(ob, d.a.type==='handoffAccept');
     else if(d.t==='chat') addChat(pid, d.text);
     return;
   }
   if(d.t==='act'){ const r=act(pid, d.a||{}); if(typeof r==='string') conn.send({t:'err', m:r}); }
   else if(d.t==='chat'){ addChat(pid, d.text); }
+}
+// el observador acepta o rechaza el lugar que le ofrecen; si acepta, se intercambian:
+// el observador pasa a manejar la ficha (plata, billetes, propiedades, tarjetas, turno) y el que se va queda mirando
+function answerHandoff(ob, accept){
+  const H=S.handoff; if(!H || H.to!==ob.id) return;
+  const p=P(H.from); S.handoff=null;
+  if(!accept || !p || p.bk){ sysChat(`${ob.name} no aceptó el lugar${p?' de '+p.name:''}.`); commit(); return; }
+  const oldName=p.name, oldTok=p.token, oldPeer=p.peerId, oldConn=p.conn;
+  let newName=ob.name; if(S.players.some(x=>x!==p && x.name.toLowerCase()===newName.toLowerCase())) newName+=' (2)';
+  Object.assign(p, {name:newName, token:ob.token, peerId:ob.peerId, conn:ob.conn, mic:false}); delete p.offAt;
+  Object.assign(ob, {name:oldName, token:oldTok, peerId:oldPeer, conn:oldConn, mic:false});
+  // también se intercambian las conexiones, para que a cada uno le llegue lo suyo
+  const cPlayer=NET.conns[p.id], cObs=NET.conns[ob.id];
+  if(cObs){ NET.conns[p.id]=cObs; cObs.pid=p.id; } else delete NET.conns[p.id];
+  if(cPlayer){ NET.conns[ob.id]=cPlayer; cPlayer.pid=ob.id; } else delete NET.conns[ob.id];
+  if(S.card && S.card.pid===p.id) S.card.who=newName;
+  log(`🔁 ${oldName} le cedió su lugar a ${newName}: sigue la partida con la misma ficha, plata y propiedades.`);
+  sysChat(`🔁 ${newName} ahora juega en lugar de ${oldName}.`);
+  try{ cObs && cObs.open && cObs.send({t:'welcome', pid:p.id, code:NET.code, why:`🎲 ¡Ahora jugás vos! Tomaste el lugar de ${oldName} con su plata y sus propiedades.`, force:true}); }catch(e){}
+  try{ cPlayer && cPlayer.open && cPlayer.send({t:'welcome', pid:null, obs:ob.id, code:NET.code, why:`🔁 Le cediste tu lugar a ${newName}. Ahora estás mirando la partida.`, force:true}); }catch(e){}
+  commit();
 }
 // nombres y fichas no se pueden repetir
 function nameEmojiTaken(name, emoji){
@@ -1328,6 +1361,7 @@ function hostOnClose(conn){
   const pid=conn.pid; if(!pid || NET.conns[pid]!==conn) return;
   delete NET.conns[pid];
   const ob=(S.observers||[]).find(x=>x.id===pid);
+  if(S.handoff && (S.handoff.to===pid || S.handoff.from===pid)) S.handoff=null;   // la oferta de lugar se cae si alguno se va
   if(ob){ ob.conn=false; S.observers=S.observers.filter(x=>x!==ob); sysChat(`👀 ${ob.name} dejó de mirar.`); commit(); return; }
   const p=P(pid); if(!p) return;
   if(S.phase==='lobby'){ S.players=S.players.filter(x=>x!==p); sysChat(`${p.name} salió de la sala.`); }
@@ -1375,7 +1409,8 @@ function connectHost(){
 }
 function clientOnData(d){
   if(d.t==='welcome'){ NET.myPid=d.pid; NET.obs=d.obs||null; NET.welcomed=true; NET.taken=null; store('bnq_client',{code:NET.code, at:Date.now()}); if(location.hash!=='#'+NET.code) history.replaceState(null,'','#'+NET.code);
-    if(d.why && !NET.obsToasted){ NET.obsToasted=true; toast(d.why); } }
+    if(d.why && (!NET.obsToasted || d.force)){ NET.obsToasted=true; toast(d.why); }
+    if(d.force){ VOICE.muteSeq=null; stopMic(false); closeModal(); } }   // cambió de lugar (jugador ↔ observador)
   else if(d.t==='state'){ S=d.s; render(); checkForcedMute(); }
   else if(d.t==='chat'){ CHAT.push(d.m); renderChat(d.m); }
   else if(d.t==='chatlog'){ CHAT=d.list||[]; renderChat(); }
@@ -1477,7 +1512,7 @@ function render(){
   if(!S) return;
   if(S.phase==='lobby'){ show('lobby'); renderLobby(); placeComm('#lobbyComm'); }
   else { show('game'); if(!$('#board').children.length) buildBoard(); placeComm('#gameComm'); renderGame(); }
-  renderLog(); renderVoice(); voiceSync(); musicSync();
+  renderLog(); renderVoice(); voiceSync(); musicSync(); renderHandoff();
 }
 function placeComm(sel){ const c=$('#comm'), t=$(sel); if(c.parentElement!==t) t.appendChild(c); }
 
@@ -2162,7 +2197,7 @@ function renderCenterInner(){
     }
   }
   if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
-  h+=busyLine()+idleBoxHTML();
+  h+=busyLine()+handoffLine()+idleBoxHTML();
   if(NET.mode==='host'){   // aviso al anfitrión de quién se fue (si no es el del turno)
     const gone=S.players.filter(x=>!x.bot && !x.bk && !x.conn && x.id!==p.id);
     if(gone.length) h+=`<div class="gone">${gone.map(x=>`⚠️ ${esc(x.name)} se fue ${offAgo(x)} · <a href="#" onclick="showPlayer('${x.id}');return false">esperar o sacar</a>`).join('<br>')}</div>`;
@@ -2569,9 +2604,35 @@ function confirmLeave(){
     : NET.mode==='client' ? (me&&me.bk ?'Salís de la sala. Si volvés con “Volver a la sala”, entrás como observador.' : 'Salís de la sala un rato. Podés volver con “Volver a la sala” y recuperás tu lugar.')
     : 'La partida queda guardada. Podés seguirla con “Continuar partida”.';
   let h=`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">${playing?'Salir un rato (sigo jugando después)':'Sí, volver al inicio'}</button>`;
+  const obsOn=(S.observers||[]).filter(o=>o.conn);
+  if(playing && NET.mode==='client' && obsOn.length) h+=`<div class="observer" style="margin-top:14px"><b>🔁 ¿Querés que alguien siga tu partida?</b><br>Le podés ceder tu lugar a un observador: sigue jugando con tu ficha, tu plata y tus propiedades, y vos te quedás mirando.
+    <button class="btn green wide" style="margin-top:8px" onclick="showHandoff()">🔁 Ceder mi lugar a un observador</button></div>`;
   if(playing) h+=`<div class="observer" style="margin-top:14px"><b>🏳️ ¿Tenés que irte y no vas a volver a jugar?</b><br>Podés retirarte de la partida: te declarás en bancarrota y los demás siguen jugando sin esperarte.
     <button class="btn gray wide" style="margin-top:8px" onclick="confirmRetire()">🏳️ Retirarme de la partida</button></div>`;
   modal(h,'leave');
+}
+// --- ceder el lugar a un observador ---
+function showHandoff(){
+  const obsOn=(S.observers||[]).filter(o=>o.conn);
+  if(!obsOn.length) return toast('No hay observadores conectados.');
+  modal(`<h3>🔁 Ceder mi lugar</h3><p>Elegí quién sigue tu partida. Le va a llegar la invitación y tiene que aceptarla.</p>
+    ${obsOn.map(o=>`<div class="prow" style="justify-content:space-between"><span class="pn">👀 ${esc(o.name)}</span><button class="btn sm green" style="flex:0 0 auto" onclick="closeModal();doAct({type:'handoffOffer',to:'${o.id}'});toast('Esperando que ${esc(o.name).replace(/'/g,'')} acepte…')">Ofrecerle mi lugar</button></div>`).join('')}`,'handoffpick');
+}
+let handoffShown=null;
+function renderHandoff(){   // invitación al observador elegido
+  const H=S && S.handoff;
+  if(!H){ handoffShown=null; if($('#modalRoot').dataset.kind==='handoff') closeModal(); return; }
+  const key=H.from+':'+H.at;
+  if(NET.obs && H.to===NET.obs && handoffShown!==key){
+    handoffShown=key; const p=P(H.from);
+    modal(`<h3>🔁 ${esc(p.name)} te ofrece su lugar</h3><p><b>${esc(p.name)}</b> se tiene que ir y te ofrece seguir su partida: jugás con su ficha ${p.emoji}, su plata, sus billetes y sus propiedades, desde donde está.</p>
+      <div class="row"><button class="btn green" onclick="closeModal();doAct({type:'handoffAccept'})">🎲 ¡Acepto, juego yo!</button><button class="btn gray" onclick="closeModal();doAct({type:'handoffReject'})">No, gracias</button></div>`,'handoff');
+  }
+}
+function handoffLine(){   // aviso para todos mientras se espera la respuesta
+  const H=S && S.handoff; if(!H) return '';
+  const p=P(H.from), o=(S.observers||[]).find(x=>x.id===H.to); if(!p || !o) return '';
+  return `<div class="gone">🔁 ${esc(p.name)} le ofrece su lugar a ${esc(o.name)}…${H.from===NET.myPid?` <a href="#" onclick="doAct({type:'handoffCancel'});return false">cancelar</a>`:''}</div>`;
 }
 function confirmRetire(){
   const me=P(meId()), isHost=NET.mode==='host';
