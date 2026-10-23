@@ -1526,9 +1526,20 @@ function noise(o){   // {t, dur, vol, freq, freq2, q, filter}
     src.connect(f); f.connect(g); g.connect(c.destination); src.start(t0, Math.random()*.5); src.stop(t0+o.dur+.02); }catch(e){}
 }
 const SFX = {
-  on: load('bnq_sfx')!==false, dice:null, loading:false,
-  load(){ if(this.dice||this.loading) return; this.loading=true;
-    fetch('dados.mp3').then(r=>r.arrayBuffer()).then(b=>ac().decodeAudioData(b)).then(buf=>{ this.dice=buf; }).catch(()=>{ this.loading=false; }); },
+  on: load('bnq_sfx')!==false, dice:null, mp3:{}, loading:false,
+  load(){ if(this.loading) return; this.loading=true;
+    fetch('dados.mp3').then(r=>r.arrayBuffer()).then(b=>ac().decodeAudioData(b)).then(buf=>{ this.dice=buf; }).catch(()=>{ this.loading=false; });
+    ['contadora','caja'].forEach(n=>fetch(n+'.mp3').then(r=>r.arrayBuffer()).then(b=>ac().decodeAudioData(b)).then(buf=>{ this.mp3[n]=buf; }).catch(()=>{})); },
+  playMp3(n, vol, delay){
+    if(!this.on || !this.mp3[n]) return false;
+    try{ const c=ac(), s=c.createBufferSource(), g=c.createGain(); s.buffer=this.mp3[n]; g.gain.value=vol; s.connect(g); g.connect(c.destination); s.start(c.currentTime+(delay||0)); return true; }catch(e){ return false; }
+  },
+  counter(delay){   // contadora.mp3: la máquina del banco contando billetes
+    if(!this.playMp3('contadora', .45, delay)) for(let k=0;k<14;k++) noise({t:(delay||0)+k*.04, dur:.02, vol:.12, freq:3000, q:2});
+  },
+  register(delay){  // caja.mp3: teclas, campanita ¡ding!, cajón y monedas
+    if(!this.playMp3('caja', .4, delay)){ const t=delay||0; tone({t, f:1760, dur:.6, vol:.06}); tone({t, f:3520, dur:.3, vol:.03}); this.coins(); }
+  },
   roll(){   // dados.mp3: cubilete + caída en la mesa (sincronizado con la animación)
     if(!this.on) return;
     if(this.dice){ try{ const c=ac(), s=c.createBufferSource(), g=c.createGain(); s.buffer=this.dice; g.gain.value=.4; s.connect(g); g.connect(c.destination); s.start(); return; }catch(e){} }
@@ -1559,6 +1570,21 @@ const SFX = {
   build(){ [0,.11].forEach(t=>{ noise({t, dur:.05, vol:.25, freq:1200, q:4}); tone({t, f:420, f2:220, dur:.07, vol:.12}); }); }
 };
 function beep(f,dur,vol){ tone({f, dur, vol:vol||.04}); }
+// sonidos de plata según lo que pasó en la mesa (se leen las líneas nuevas del Historial):
+//  - alguien entrega billetes o el Banco cambia/cuenta plata  → contadora de billetes
+//  - se termina un pago, se compra o se paga al Banco         → caja registradora
+let sfxLogSeq=-1, lastMoneySound=0;
+const moneySoundNow = () => Date.now()-lastMoneySound<400;
+function moneySounds(){
+  if(!S || !S.log) return;
+  if(sfxLogSeq<0 || S.logSeq<sfxLogSeq){ sfxLogSeq=S.logSeq; return; }   // al entrar no suena lo viejo
+  const nuevos=S.log.filter(l=>l.i>sfxLogSeq).map(l=>l.m); sfxLogSeq=S.logSeq;
+  if(!nuevos.length) return;
+  const cuenta = nuevos.some(m=>/ entrega |da de vuelto|🏦 .*cambia un billete/.test(m));
+  const caja = nuevos.some(m=>/✅ .* pagó|🏷️| paga ₲|levanta la hipoteca/.test(m));
+  if(cuenta){ SFX.counter(); lastMoneySound=Date.now(); }
+  if(caja){ SFX.register(cuenta ? 1.25 : 0); lastMoneySound=Date.now(); }   // si hubo conteo, la caja suena después
+}
 function toggleSfx(){ SFX.on=!SFX.on; store('bnq_sfx',SFX.on); renderSfxBtn(); if(SFX.on) SFX.coins(); }
 function renderSfxBtn(){ const b=$('#btnSfx'); b.textContent=SFX.on?'🎵':'🔇'; b.title=SFX.on?'Apagar sonidos del juego':'Prender sonidos del juego'; }
 renderSfxBtn();
@@ -1785,8 +1811,9 @@ function renderGame(){
     if(pj===false && p.jail) SFX.jail();
   }
   const owned=Object.keys(S.props).length, houses=Object.values(S.props).reduce((a,o)=>a+o.h,0);
-  if(prevOwned!=null && owned>prevOwned) SFX.buy(); else if(prevHouses!=null && houses>prevHouses) SFX.build();
+  if(prevHouses!=null && houses>prevHouses) SFX.build();
   prevOwned=owned; prevHouses=houses;
+  moneySounds();
   renderCenter(); renderPlayers(); renderTrades();
   const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true); if(m.dataset.kind==='titles') showTitles(null, true); if(m.dataset.kind==='buy') showBuyTitle(true);
   // alquiler en mano: abrir solo la ventana de billetes al que le toca actuar
@@ -2118,7 +2145,7 @@ function renderPlayers(){
     const d=p.money-before, el=document.createElement('span');
     el.className='delta '+(d>0?'up':'down'); el.textContent=(d>0?'+':'−')+fmt(Math.abs(d)).replace('₲ ','₲');
     row.appendChild(el);
-    if(p.id===meId()) d>0 ? SFX.coins() : SFX.pay();
+    if(p.id===meId() && d>0 && !moneySoundNow()) SFX.coins();   // los pagos ya suenan con la contadora y la caja
   }
   renderWallet();
 }
@@ -2400,7 +2427,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
-  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
+  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; sfxLogSeq=-1; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
   // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
   [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
   prevOwned=prevHouses=null; prevWallet={pid:null, bills:null}; shownRoll=-1; lastTurnPid=null;
