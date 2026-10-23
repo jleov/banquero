@@ -206,7 +206,9 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tcols h4{margin:6px 0}
 .chk{display:flex;align-items:center;gap:6px;font-size:13px;background:#fff;border-radius:6px;padding:4px 6px;margin:3px 0}
 .chk input{width:18px;height:18px}
-.cardov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:60;background:rgba(0,0,0,.35);padding:16px}
+.cardov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:60;background:rgba(0,0,0,.45);padding:16px}
+.cardov.watch{background:rgba(0,0,0,.15);pointer-events:none}
+.bigcard.noanim{animation:none}
 .bigcard{width:min(340px,100%);border-radius:16px;padding:18px;color:#fff;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6);animation:flip .45s ease-out}
 .bigcard.cc{background:linear-gradient(160deg,#f28c28,#c4570c)}
 .bigcard.ca{background:linear-gradient(160deg,#1d5fd1,#0b2f7a)}
@@ -690,7 +692,7 @@ function land(p, dice, mode){
 function drawCard(p, deck){
   const d=S.decks[deck], id=d.shift(), c=CARDS[deck][id];
   if(c.k!=='free') d.push(id);
-  S.card={deck, x:c.x, id:++S.cardId, who:p.name};
+  S.card={deck, x:c.x, id:++S.cardId, who:p.name, pid:p.id, open:true, at:Date.now()};
   log(`${p.name} saca ${DECK_NAME[deck]}: “${c.x}”`);
   switch(c.k){
     case 'money': if(c.v>=0){ p.money+=c.v*K; } else pay(p,-c.v*K,null,'tarjeta'); break;
@@ -874,13 +876,17 @@ function act(pid, a){
       log(`${owner.name} da de vuelto ${billText(sel)} (${fmt(R.change)}).`);
       finishRent(); break;
     }
+    case 'cardClose':   // solo el que sacó la tarjeta la cierra (o el anfitrión si se desconectó)
+      if(!S.card || !S.card.open) return;
+      if(pid!==S.card.pid && !(pid===S.hostPid && !P(S.card.pid).conn)) return;
+      S.card.open=false; break;
     case 'exchange':   // cambiar un billete en el Banco por otros más chicos
       if(!canExchange(pid)) return 'Podés pedir cambio al Banco solo en tu turno.';
       if(!exchangeBill(p, a.v, a.opt)) return 'Ese billete no se puede cambiar.';
       log(`🏦 ${p.name} cambia un billete de ${fmt(+a.v)} en el Banco por ${billText(CHANGE_OPTS[+a.v][a.opt|0])}.`); break;
     case 'skipTurn':
       if(pid!==S.hostPid || cur().conn) return; log(`${cur().name} no está conectado: se salta su turno.`);
-      if(S.rent) autoRent(); nextTurn(); break;
+      if(S.card) S.card.open=false; if(S.rent) autoRent(); nextTurn(); break;
     default: return;
   }
   checkWinner(); commit();
@@ -913,6 +919,12 @@ function botTick(){
     if(Date.now()-t.seen<1500) continue;
     if(!validTrade(t) && botTradeValue(b,t)>0){ botChat(b,'¡Trato hecho! 🤝'); act(b.id,{type:'tradeAccept',id:t.id}); }
     else { botChat(b,'Mmm… no me conviene.'); act(b.id,{type:'tradeReject',id:t.id}); }
+    return;
+  }
+  // tarjeta abierta: el bot la "lee" unos segundos y la cierra; mientras tanto nadie juega
+  if(S.card && S.card.open){
+    const d=P(S.card.pid);
+    if(d && d.bot && Date.now()>rollingUntil && Date.now()-S.card.at>3500) act(d.id,{type:'cardClose'});
     return;
   }
   // alquiler en mano: el bot paga con sus billetes o da el vuelto
@@ -1394,8 +1406,7 @@ function renderGame(){
   }
   renderTokens();
   // tarjeta
-  if(S.card && S.card.id!==shownCard){ if(shownCard!==-1) showCard(S.card); shownCard=S.card.id; }
-  if(shownCard===-1) shownCard=S.card?S.card.id:0;
+  renderCardOverlay();
   // aviso de turno
   if(S.phase==='play' && cur().id!==lastTurnPid){ lastTurnPid=cur().id; if(canAct(cur().id)) SFX.turn(); }
   // sonidos de lo que pasó en el tablero
@@ -1804,11 +1815,21 @@ function sendTrade(){
 function confirmBankrupt(){
   modal(`<h3>¿Declararte en quiebra?</h3><p>Perdés la partida. Tus propiedades pasan a quien le debés (o al Banco).</p><button class="btn red wide" onclick="closeModal();doAct({type:'bankrupt'})">Sí, me declaro en quiebra</button>`,'bk');
 }
-function showCard(c){
-  const r=$('#cardRoot');
-  r.innerHTML=`<div class="cardov" onclick="this.remove()"><div class="bigcard ${c.deck}"><div class="ci">${c.deck==='cc'?'💳':'🏦'}</div><h2>${DECK_NAME[c.deck].toUpperCase()}</h2><div>${esc(c.who)} sacó:</div><p>${esc(c.x)}</p><small>Tocá para cerrar</small></div></div>`;
-  SFX.card();
-  clearTimeout(showCard.t); showCard.t=setTimeout(()=>{ r.innerHTML=''; },5000);
+// la tarjeta queda abierta hasta que la cierre el que la sacó; los demás la ven y esperan
+function renderCardOverlay(){
+  const r=$('#cardRoot'), c=S && S.phase==='play' ? S.card : null;
+  if(!c || !c.open){ r.innerHTML=''; r.dataset.id=''; return; }
+  const drawer=P(c.pid), mine=drawer && canAct(drawer.id);
+  const hostCanClose = !mine && NET.mode==='host' && drawer && !drawer.conn;
+  const key=c.id+':'+(mine||hostCanClose);
+  if(r.dataset.id===key) return;
+  const isNew = !r.dataset.id || !r.dataset.id.startsWith(c.id+':');
+  r.dataset.id=key;
+  r.innerHTML=`<div class="cardov ${mine||hostCanClose?'':'watch'}"><div class="bigcard ${c.deck}${isNew?'':' noanim'}"><div class="ci">${c.deck==='cc'?'💳':'🏦'}</div><h2>${DECK_NAME[c.deck].toUpperCase()}</h2>
+    <div>${mine?(NET.mode==='local'?esc(c.who)+', sacaste:':'Sacaste:'):esc(c.who)+' sacó:'}</div><p>${esc(c.x)}</p>
+    ${mine||hostCanClose?`<button class="btn wide" style="background:#fff;color:#222;font-size:16px" onclick="doAct({type:'cardClose'},'${c.pid}')">${mine?'✔ Entendido, cerrar':'Cerrar (jugador desconectado)'}</button>`
+          :`<small>⏳ Esperando que ${esc(c.who)} la lea y la cierre…</small>`}</div></div>`;
+  if(isNew) SFX.card();
 }
 function showRules(){
   modal(`<div class="rules"><h3>📜 Reglas del Banquero Paraguayo</h3>
@@ -1832,7 +1853,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
-  $('#board').innerHTML=''; netBar(false); show('menu'); refreshResume();
+  $('#board').innerHTML=''; $('#cardRoot').innerHTML=''; $('#cardRoot').dataset.id=''; netBar(false); show('menu'); refreshResume();
 }
 
 /* ====================== MENÚ ====================== */
