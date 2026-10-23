@@ -124,6 +124,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tools{display:flex;flex-wrap:wrap;gap:6px}
 .tools .btn{flex:1 1 auto}
 .trades:empty{display:none}
+.observer{background:#eef3ff;border:1px solid #9db4e8;border-radius:10px;padding:10px;font-size:13.5px;line-height:1.4}
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
 .bills{display:flex;flex-wrap:wrap;gap:8px 10px}
@@ -771,7 +772,8 @@ function nextTurn(){
   S.tp='roll';
   log(`Turno de ${cur().name}.`);
 }
-function goBankrupt(p){
+function goBankrupt(p, retire){
+  if(retire){ p.cred=null; p.retired=true; if(p.money<0) p.money=0; }   // se retira: no le debe a nadie, todo vuelve al Banco
   let sold=0;
   for(const i in S.props){ const o=S.props[i]; if(o.o===p.id && o.h>0){ sold+=o.h*GROUPS[B[i].g].h*K/2; o.h=0; } }
   p.money+=sold;
@@ -784,7 +786,7 @@ function goBankrupt(p){
   } else {
     for(const i in S.props) if(S.props[i].o===p.id) delete S.props[i];
     for(const d of p.jcards) S.decks[d].push(CARDS[d].findIndex(c=>c.k==='free'));
-    log(`💀 ${p.name} quiebra. Sus propiedades vuelven al Banco.`);
+    log(retire ? `🏳️ ${p.name} se retira de la partida (bancarrota voluntaria). Sus propiedades vuelven al Banco.` : `💀 ${p.name} quiebra. Sus propiedades vuelven al Banco.`);
   }
   p.jcards=[]; p.money=0; p.bk=true; p.jail=false;
   S.trades=S.trades.filter(t=>t.from!==p.id && t.to!==p.id);
@@ -858,6 +860,12 @@ function act(pid, a){
     case 'unmort': if(!turn) return 'Solo podés levantar una hipoteca durante tu turno.'; if(!canUnmort(pid,i)) return 'No te alcanza para levantar la hipoteca.';
       S.props[i].m=false; p.money-=unmortCost(i); log(`${p.name} levanta la hipoteca de ${B[i].n} (${fmt(unmortCost(i))}).`); break;
     case 'bankrupt': goBankrupt(p); break;
+    case 'retire': {   // dejar de jugar antes de tiempo
+      if((S.rent && (S.rent.from===pid || S.rent.to===pid)) || (S.payQ||[]).some(q=>q.from===pid || q.to===pid))
+        return 'Terminá primero el pago que está en curso.';
+      if(S.card && S.card.open && S.card.pid===pid) S.card.open=false;
+      goBankrupt(p, true); break;
+    }
     case 'trade': {
       const t={id:++S.tradeSeq, from:pid, to:a.to, gm:Math.round(+a.gm||0), rm:Math.round(+a.rm||0),
                gp:(a.gp||[]).map(Number), rp:(a.rp||[]).map(Number), gc:Math.max(0,a.gc|0), rc:Math.max(0,a.rc|0)};
@@ -1640,6 +1648,12 @@ const isNeg = p => p.money!=null ? p.money<0 : !!p.neg;
 const moneyText = p => p.bk ? '—' : seesMoney(p) && p.money!=null ? fmt(p.money) : (isNeg(p) ? '⚠️ No puede pagar' : '🔒 Secreto');
 function renderWallet(){
   const pid=meId(), p=pid&&P(pid); const w=$('#wallet');
+  if(p && p.bk && S.phase==='play'){   // quebró o se retiró: sigue mirando como observador
+    w.style.display='block';
+    w.innerHTML=`<div class="observer">👀 <b>Estás mirando como observador.</b><br>${p.retired?'Te retiraste de la partida':'Quedaste en bancarrota'}: ya no jugás, pero podés seguir viendo el tablero y usar el chat.
+      <button class="btn sm gray wide" style="margin-top:8px" onclick="confirmLeave()">🏠 Salir al inicio</button></div>`;
+    return;
+  }
   if(!p || p.bk){ w.innerHTML=''; w.style.display='none'; return; }
   w.style.display='block';
   w.innerHTML=`<h4><span>💵 ${NET.mode==='local'?'Billetes de '+esc(p.name):'Tus billetes'}</span><span>${fmt(p.money)}</span></h4>${walletHTML(p)}
@@ -1653,7 +1667,7 @@ function renderPlayers(){
     const n=Object.values(S.props).filter(o=>o.o===p.id).length;
     return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" data-pid="${p.id}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
-      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?' · en quiebra':''}</span></span>
+      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
       <span class="mo ${isNeg(p)?'neg':''}">${moneyText(p)}</span></div>`;
   }).join('');
   // cartelito +/− cuando cambia la plata
@@ -1973,11 +1987,30 @@ function resumeClient(code){
   clientJoin(code);
 }
 function confirmLeave(){
+  const me=S && S.phase==='play' && meId() ? P(meId()) : null;
+  const playing = me && !me.bk && !me.bot;
   const msg = NET.mode==='host' && S.phase!=='lobby' ? 'La partida queda guardada en este dispositivo. Tus amigos quedan esperando hasta que vuelvas con “Reanudar como anfitrión”.'
     : NET.mode==='host' ? 'Se cierra la sala y tus amigos salen de ella.'
-    : NET.mode==='client' ? 'Salís de la sala. Podés volver con “Volver a la sala” y recuperás tu lugar.'
+    : NET.mode==='client' ? (me&&me.bk ? 'Salís de la sala. Si volvés con “Volver a la sala”, entrás como observador.' : 'Salís de la sala un rato. Podés volver con “Volver a la sala” y recuperás tu lugar.')
     : 'La partida queda guardada. Podés seguirla con “Continuar partida”.';
-  modal(`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">Sí, volver al inicio</button>`,'leave');
+  let h=`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">${playing?'Salir un rato (sigo jugando después)':'Sí, volver al inicio'}</button>`;
+  if(playing) h+=`<div class="observer" style="margin-top:14px"><b>🏳️ ¿Tenés que irte y no vas a volver a jugar?</b><br>Podés retirarte de la partida: te declarás en bancarrota y los demás siguen jugando sin esperarte.
+    <button class="btn gray wide" style="margin-top:8px" onclick="confirmRetire()">🏳️ Retirarme de la partida</button></div>`;
+  modal(h,'leave');
+}
+function confirmRetire(){
+  const me=P(meId()), isHost=NET.mode==='host';
+  modal(`<h3>🏳️ ¿Retirarte de la partida?</h3>
+    <p>${NET.mode==='local'?`<b>${esc(me.name)}</b> se declara`:'Te declarás'} en <b>bancarrota voluntaria</b>:</p>
+    <ul style="font-size:14px;line-height:1.5"><li>Tus propiedades, casas y hoteles vuelven al Banco.</li><li>Tu dinero se devuelve al Banco.</li><li>Ya no jugás más esta partida, ni podés volver a jugarla.</li>
+      ${NET.mode==='local'?'':`<li>Si volvés antes de que termine, entrás como <b>observador 👀</b>: ves el tablero y podés chatear.</li>`}</ul>
+    ${isHost?'<p class="observer"><b>⚠️ Sos el anfitrión:</b> la partida funciona desde tu dispositivo. Si te retirás, dejá el juego abierto (podés mirar como observador) para que los demás puedan terminar.</p>':''}
+    <button class="btn red wide" onclick="doRetire()">Sí, me retiro</button>`,'retire');
+}
+function doRetire(){
+  closeModal(); doAct({type:'retire'});
+  if(NET.mode==='client') setTimeout(()=>modal(`<h3>🏳️ Te retiraste</h3><p>Gracias por jugar. ¿Querés quedarte mirando cómo termina la partida?</p>
+    <div class="row"><button class="btn green" onclick="closeModal()">👀 Quedarme mirando</button><button class="btn gray" onclick="closeModal();leaveToMenu()">🏠 Salir al inicio</button></div>`,'retired'), 700);
 }
 
 $('#myName').value = load('bnq_name') || '';
