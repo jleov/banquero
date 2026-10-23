@@ -39,6 +39,8 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tokens{display:flex;flex-wrap:wrap;gap:6px}
 .tok{font-size:24px;width:46px;height:46px;border-radius:50%;border:3px solid transparent;background:#fff;cursor:pointer;padding:0}
 .tok.sel{border-color:var(--red);transform:scale(1.08)}
+.tok.taken{opacity:.35;position:relative;cursor:not-allowed}
+.tok.taken::after{content:"✕";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--red);font-size:30px;font-weight:900}
 .code{font-size:38px;font-weight:900;letter-spacing:6px;text-align:center;color:var(--blue);margin:4px 0}
 .plist{list-style:none;padding:0;margin:8px 0}
 .plist li{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:#fff;margin-bottom:6px}
@@ -134,7 +136,10 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
   border:2px solid #fff;outline:1px solid var(--bc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;text-shadow:0 1px 1px rgba(0,0,0,.4)}
 .bill.stack{box-shadow:3px 3px 0 -1px #fff,3px 3px 0 0 var(--bc),6px 6px 0 -1px #fff,6px 6px 0 0 var(--bc)}
 .bill .bseal{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.3);font-size:10px;display:flex;align-items:center;justify-content:center}
-.bill .bv{margin-left:12px}
+.bill .bv{margin-left:13px;font-size:12px;letter-spacing:-.2px}
+.bill.coin{width:42px;height:42px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3b0,#d8b13e 45%,#8f6d14);color:#4a3606;text-shadow:0 1px 0 rgba(255,255,255,.5);outline-color:#8f6d14}
+.bill.coin .bseal{display:none}.bill.coin .bv{margin:0;font-size:11px}
+.bill.coin.stack{box-shadow:2px 3px 0 -1px #fff,2px 3px 0 0 #8f6d14,4px 6px 0 -1px #fff,4px 6px 0 0 #8f6d14}
 .bill .bn{position:absolute;right:-8px;top:-9px;background:#222;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;text-shadow:none;border:2px solid #fff}
 .bill.pop{animation:billpop .6s}
 .bill.pickable{cursor:pointer;user-select:none}
@@ -333,10 +338,10 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 <script>
 'use strict';
 /* ====================== DATOS DEL JUEGO ====================== */
-const K = 10000;                 // 1 unidad = ₲ 10.000
-const START_MONEY = 1500*K;      // ₲ 15.000.000
-const SALARY = 200*K;            // ₲ 2.000.000 al pasar por la Salida
-const JAIL_FINE = 50*K;          // ₲ 500.000
+const K = 1000;                  // 1 unidad = ₲ 1.000
+const START_MONEY = 1500*K;      // ₲ 1.500.000
+const SALARY = 200*K;            // ₲ 200.000 al pasar por la Salida
+const JAIL_FINE = 50*K;          // ₲ 50.000
 const PREFIX = 'bnqpy26-';
 const EMOJIS = ['🧉','⚽','🚌','🦜','🐆','🎩','🚗','🐄'];
 const COLORS = ['#d52b1e','#0038a8','#2a9d3f','#f28c28','#8e44ad','#c99a06'];
@@ -345,7 +350,7 @@ const GROUPS = {
   rj:{c:'#d62828',n:'Rojo',h:150}, am:{c:'#f2c200',n:'Amarillo',h:150}, ve:{c:'#2a9d3f',n:'Verde',h:200}, az:{c:'#1d3fa8',n:'Azul',h:200}
 };
 const B = [
-  {t:'go',n:'SALIDA',ic:'➡️',sub:'Cobre ₲ 2.000.000'},
+  {t:'go',n:'SALIDA',ic:'➡️',sub:'Cobre ₲ 200.000'},
   {t:'st',g:'ma',n:'Avda. Fernando de la Mora',s:'F. de la Mora',p:60,r:[2,10,30,90,160,250]},
   {t:'ca',n:'Caja de Ahorros',s:'Caja de Ahorros',ic:'🏦'},
   {t:'st',g:'ma',n:'Avda. Eusebio Ayala',s:'Eusebio Ayala',p:60,r:[4,20,60,180,320,450]},
@@ -386,43 +391,43 @@ const B = [
   {t:'tax',n:'Impuesto Inmobiliario',s:'Imp. Inmobiliario',ic:'🏛️',a:100},
   {t:'st',g:'az',n:'Avda. Costanera',s:'Costanera',p:400,r:[50,200,600,1400,1700,2000]}
 ];
-// k: money | goto | back | jail | free | repairs | each | nearest   (valores en unidades de ₲10.000)
+// k: money | goto | back | jail | free | repairs | each | nearest   (valores en unidades de ₲1.000)
 const CARDS = {
   cc:[
-    {k:'goto',to:0,x:'Avance hasta la SALIDA y cobre ₲ 2.000.000.'},
-    {k:'goto',to:29,x:'Avance hasta la Avda. Mariscal López. Si pasa por la Salida, cobre ₲ 2.000.000.'},
+    {k:'goto',to:0,x:'Avance hasta la SALIDA y cobre ₲ 200.000.'},
+    {k:'goto',to:29,x:'Avance hasta la Avda. Mariscal López. Si pasa por la Salida, cobre ₲ 200.000.'},
     {k:'goto',to:39,x:'Salga a pasear por la Avda. Costanera. Avance hasta allí.'},
-    {k:'goto',to:11,x:'Avance hasta la Avda. Artigas. Si pasa por la Salida, cobre ₲ 2.000.000.'},
+    {k:'goto',to:11,x:'Avance hasta la Avda. Artigas. Si pasa por la Salida, cobre ₲ 200.000.'},
     {k:'nearest',type:'tr',x:'Avance hasta el transporte más cercano. Si tiene dueño, pague el doble del alquiler. Si no, puede comprarlo.'},
     {k:'nearest',type:'tr',x:'Avance hasta el transporte más cercano. Si tiene dueño, pague el doble del alquiler. Si no, puede comprarlo.'},
     {k:'nearest',type:'ut',x:'Avance hasta el servicio más cercano (ANDE o ESSAP). Si tiene dueño, pague 10 veces lo que sacó en los dados.'},
-    {k:'money',v:50,x:'El banco le paga intereses de su cuenta corriente: cobre ₲ 500.000.'},
+    {k:'money',v:50,x:'El banco le paga intereses de su cuenta corriente: cobre ₲ 50.000.'},
     {k:'free',x:'SALGA LIBRE DE TACUMBÚ. Guarde esta tarjeta hasta usarla o negociarla.'},
     {k:'back',n:3,x:'Retroceda 3 casilleros.'},
-    {k:'jail',x:'Vaya preso a Tacumbú directamente. No pase por la Salida ni cobre ₲ 2.000.000.'},
-    {k:'repairs',h:25,ho:100,x:'Refacciones generales: pague ₲ 250.000 por cada casa y ₲ 1.000.000 por cada hotel.'},
-    {k:'money',v:-15,x:'Multa de la Policía Municipal de Tránsito por exceso de velocidad: pague ₲ 150.000.'},
-    {k:'goto',to:5,x:'Viaje en el Ferrocarril Carlos A. López. Si pasa por la Salida, cobre ₲ 2.000.000.'},
-    {k:'each',v:-50,x:'Lo eligieron presidente de la comisión vecinal: pague ₲ 500.000 a cada jugador.'},
-    {k:'money',v:150,x:'Vence su plazo fijo: cobre ₲ 1.500.000.'}
+    {k:'jail',x:'Vaya preso a Tacumbú directamente. No pase por la Salida ni cobre ₲ 200.000.'},
+    {k:'repairs',h:25,ho:100,x:'Refacciones generales: pague ₲ 25.000 por cada casa y ₲ 100.000 por cada hotel.'},
+    {k:'money',v:-15,x:'Multa de la Policía Municipal de Tránsito por exceso de velocidad: pague ₲ 15.000.'},
+    {k:'goto',to:5,x:'Viaje en el Ferrocarril Carlos A. López. Si pasa por la Salida, cobre ₲ 200.000.'},
+    {k:'each',v:-50,x:'Lo eligieron presidente de la comisión vecinal: pague ₲ 50.000 a cada jugador.'},
+    {k:'money',v:150,x:'Vence su plazo fijo: cobre ₲ 150.000.'}
   ],
   ca:[
-    {k:'goto',to:0,x:'Avance hasta la SALIDA y cobre ₲ 2.000.000.'},
-    {k:'money',v:200,x:'Error del banco a su favor: cobre ₲ 2.000.000.'},
-    {k:'money',v:-50,x:'Consulta médica en el sanatorio: pague ₲ 500.000.'},
-    {k:'money',v:50,x:'Vendió sus acciones de la cooperativa: cobre ₲ 500.000.'},
+    {k:'goto',to:0,x:'Avance hasta la SALIDA y cobre ₲ 200.000.'},
+    {k:'money',v:200,x:'Error del banco a su favor: cobre ₲ 200.000.'},
+    {k:'money',v:-50,x:'Consulta médica en el sanatorio: pague ₲ 50.000.'},
+    {k:'money',v:50,x:'Vendió sus acciones de la cooperativa: cobre ₲ 50.000.'},
     {k:'free',x:'SALGA LIBRE DE TACUMBÚ. Guarde esta tarjeta hasta usarla o negociarla.'},
-    {k:'jail',x:'Vaya preso a Tacumbú directamente. No pase por la Salida ni cobre ₲ 2.000.000.'},
-    {k:'money',v:100,x:'Cobró el aguinaldo: ₲ 1.000.000.'},
-    {k:'money',v:20,x:'Devolución del IVA: cobre ₲ 200.000.'},
-    {k:'each',v:10,x:'¡Es su cumpleaños! Cada jugador le regala ₲ 100.000 para el asado.'},
-    {k:'money',v:100,x:'Vence su seguro de vida: cobre ₲ 1.000.000.'},
-    {k:'money',v:-100,x:'Pague la internación en el hospital: ₲ 1.000.000.'},
-    {k:'money',v:-50,x:'Pague la cuota del colegio: ₲ 500.000.'},
-    {k:'money',v:25,x:'Cobre honorarios por consultoría: ₲ 250.000.'},
-    {k:'repairs',h:40,ho:115,x:'Arreglo de veredas y empedrado: pague ₲ 400.000 por casa y ₲ 1.150.000 por hotel.'},
-    {k:'money',v:10,x:'Segundo premio en el concurso de chipa de San Juan: cobre ₲ 100.000.'},
-    {k:'money',v:100,x:'Herencia de un tío de Encarnación: cobre ₲ 1.000.000.'}
+    {k:'jail',x:'Vaya preso a Tacumbú directamente. No pase por la Salida ni cobre ₲ 200.000.'},
+    {k:'money',v:100,x:'Cobró el aguinaldo: ₲ 100.000.'},
+    {k:'money',v:20,x:'Devolución del IVA: cobre ₲ 20.000.'},
+    {k:'each',v:10,x:'¡Es su cumpleaños! Cada jugador le regala ₲ 10.000 para el asado.'},
+    {k:'money',v:100,x:'Vence su seguro de vida: cobre ₲ 100.000.'},
+    {k:'money',v:-100,x:'Pague la internación en el hospital: ₲ 100.000.'},
+    {k:'money',v:-50,x:'Pague la cuota del colegio: ₲ 50.000.'},
+    {k:'money',v:25,x:'Cobre honorarios por consultoría: ₲ 25.000.'},
+    {k:'repairs',h:40,ho:115,x:'Arreglo de veredas y empedrado: pague ₲ 40.000 por casa y ₲ 115.000 por hotel.'},
+    {k:'money',v:10,x:'Segundo premio en el concurso de chipa de San Juan: cobre ₲ 10.000.'},
+    {k:'money',v:100,x:'Herencia de un tío de Encarnación: cobre ₲ 100.000.'}
   ]
 };
 const DECK_NAME = {cc:'Cuenta Corriente', ca:'Caja de Ahorros'};
@@ -454,37 +459,38 @@ const ownsGroup = (pid,g) => groupIdx(g).every(i=>S.props[i] && S.props[i].o===p
 const countType = (pid,t) => B.filter((s,i)=>s.t===t && S.props[i] && S.props[i].o===pid).length;
 const groupClear = g => groupIdx(g).every(j=>!S.props[j] || S.props[j].h===0);
 const mortValue = i => B[i].p*K/2;
-const unmortCost = i => Math.ceil(B[i].p*K/2*1.1/10000)*10000;   // redondeado al billete más chico
+const unmortCost = i => Math.ceil(B[i].p*K/2*1.1/1000)*1000;   // redondeado a la moneda más chica
 
-// billetes del Banquero (como en la caja del juego de mesa)
-const BILLS=[{v:5000000,c:'#8d6e2f'},{v:1000000,c:'#6a3d9a'},{v:500000,c:'#e67e22'},{v:200000,c:'#2e8b57'},{v:100000,c:'#1f6fb5'},{v:50000,c:'#d6589f'},{v:10000,c:'#6f7f80'}];
-const BILL_START={10000:5,50000:5,100000:5,200000:6,500000:2};   // billetes chicos que se guardan para dar vuelto; el resto en billetes grandes
+// billetes de guaraníes (los de verdad: 100.000, 50.000, 20.000, 10.000, 5.000 y 2.000)
+// + la moneda de ₲ 1.000, que hace falta para poder dar cualquier vuelto (por ejemplo ₲ 3.000)
+const BILLS=[{v:100000,c:'#1e8a5a'},{v:50000,c:'#c0392b'},{v:20000,c:'#1f5fb0'},{v:10000,c:'#8e2a52'},{v:5000,c:'#7d3c98'},{v:2000,c:'#d6589f'},{v:1000,c:'#b8962e',coin:true}];
+const BILL_START={1000:2,2000:4,5000:4,10000:5,20000:6,50000:6};   // billetes chicos que se guardan para dar vuelto; el resto en billetes de 100.000
+const isCoin = v => +v===1000;
 function billsOf(amount){
   const out={}; BILLS.forEach(b=>out[b.v]=0);
-  let rem=Math.max(0,Math.floor(amount/10000)*10000);
+  let rem=Math.max(0,Math.floor(amount/1000)*1000);
   for(const b of BILLS.slice().reverse()){ const n=Math.min(BILL_START[b.v]||0, Math.floor(rem/b.v)); out[b.v]+=n; rem-=n*b.v; }
   for(const b of BILLS){ const n=Math.floor(rem/b.v); out[b.v]+=n; rem-=n*b.v; }
   return out;
 }
-const billLabel = v => v>=1e6 ? (v/1e6)+' M' : (v/1000)+' mil';
+const billLabel = v => (+v).toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.');
 const BILL_COLOR = Object.fromEntries(BILLS.map(b=>[b.v,b.c]));
 const billTotal = bl => BILLS.reduce((a,b)=>a+(bl[b.v]||0)*b.v,0);
 const billCount = bl => BILLS.reduce((a,b)=>a+(bl[b.v]||0),0);
 const billText = bl => BILLS.filter(b=>bl[b.v]).map(b=>`${bl[b.v]}×${billLabel(b.v)}`).join(' + ');
-// el Banco cambia un billete por otros más chicos
-const BREAK = {5000000:{1000000:5}, 1000000:{500000:2}, 500000:{200000:2,100000:1}, 200000:{100000:2}, 100000:{50000:2}, 50000:{10000:5}};
 function addBills(p, amt){ for(const b of BILLS){ const n=Math.floor(amt/b.v); if(n){ p.bills[b.v]=(p.bills[b.v]||0)+n; amt-=n*b.v; } } }
 function takeBills(p, sel){ for(const v in sel) p.bills[v]-=sel[v]; }
 function giveBills(p, sel){ for(const v in sel) p.bills[v]=(p.bills[v]||0)+sel[v]; }
 // formas de pedir cambio de cada billete (la primera es la que usa el vuelto automático)
 const CHANGE_OPTS = {
-  5000000:[{1000000:5},{1000000:4,500000:2},{1000000:3,500000:2,200000:5}],
-  1000000:[{500000:2},{200000:5},{100000:10},{500000:1,200000:2,100000:1}],
-  500000:[{200000:2,100000:1},{100000:5},{50000:10}],
-  200000:[{100000:2},{50000:4},{100000:1,50000:1,10000:5}],
-  100000:[{50000:2},{10000:10}],
-  50000:[{10000:5}]
+  100000:[{50000:2},{20000:5},{50000:1,20000:2,10000:1},{10000:10}],
+  50000:[{20000:2,10000:1},{10000:5},{20000:2,5000:2}],
+  20000:[{10000:2},{5000:4},{10000:1,5000:1,2000:2,1000:1}],
+  10000:[{5000:2},{2000:5},{5000:1,2000:2,1000:1}],
+  5000:[{2000:2,1000:1},{1000:5}],
+  2000:[{1000:2}]
 };
+const BREAK = CHANGE_OPTS;
 function exchangeBill(p, v, opt){
   v=+v; const o=CHANGE_OPTS[v] && CHANGE_OPTS[v][opt|0];
   if(!o || !(p.bills[v]>0)) return false;
@@ -525,7 +531,7 @@ function autoChange(p, amt){
 function walletHTML(p){
   if(p.money<0) return `<div class="muted" style="color:var(--red)">Sin billetes: debe ${fmt(-p.money)} al Banco.</div>`;
   const bl=p.bills || billsOf(p.money);
-  const items=BILLS.filter(b=>bl[b.v]>0).map(b=>`<div class="bill ${bl[b.v]>1?'stack':''}" style="--bc:${b.c}" data-v="${b.v}" title="${bl[b.v]} billete(s) de ${fmt(b.v)}">
+  const items=BILLS.filter(b=>bl[b.v]>0).map(b=>`<div class="bill ${bl[b.v]>1?'stack':''} ${b.coin?'coin':''}" style="--bc:${b.c}" data-v="${b.v}" title="${bl[b.v]} ${b.coin?'moneda(s)':'billete(s)'} de ${fmt(b.v)}">
     <span class="bseal">₲</span><span class="bv">${billLabel(b.v)}</span><span class="bn">×${bl[b.v]}</span></div>`).join('');
   const cards=(p.jcards||[]).map(d=>`<div class="jcard ${d}" title="Usala cuando estés preso o vendela con 🤝 Negociar">🎫 Salga libre<small>de Tacumbú</small></div>`).join('');
   return `<div class="bills">${items||'<span class="muted">Sin billetes</span>'}${cards}</div>`;
@@ -620,13 +626,13 @@ function startGame(){
   const players = shuffle(S.players).map(p=>Object.assign(p,{money:START_MONEY,bills:billsOf(START_MONEY),pos:0,jail:false,jailT:0,jcards:[],bk:false,cred:null}));
   S = {phase:'play', players, seq:S.seq, hostPid:S.hostPid, props:{}, turn:0, tp:'roll', dbl:0, rolledDbl:false,
        roll:[1,1], rollId:0, card:null, cardId:0, pendingBuy:null, decks:{cc:shuffle(range(16)), ca:shuffle(range(16))},
-       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0};
-  log('¡Empieza la partida! El Banquero reparte a cada jugador '+fmt(START_MONEY)+': 2 billetes de ₲ 5.000.000, 2 de ₲ 1.000.000, 2 de ₲ 500.000, 6 de ₲ 200.000, 5 de ₲ 100.000, 5 de ₲ 50.000 y 5 de ₲ 10.000.');
+       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0, rolled:{}, observers:S.observers||[], ver:2};
+  log('¡Empieza la partida! El Banquero reparte a cada jugador '+fmt(START_MONEY)+': 10 billetes de ₲ 100.000, 6 de ₲ 50.000, 6 de ₲ 20.000, 5 de ₲ 10.000, 4 de ₲ 5.000, 4 de ₲ 2.000 y 2 monedas de ₲ 1.000.');
   log('Turno de '+cur().name+'.');
 }
 function backToLobby(){
-  const players=S.players.filter(p=>p.conn || NET.mode==='local');
-  S = lobbyState(); S.players=players; S.seq=players.reduce((m,p)=>Math.max(m,+p.id.slice(1)),0);
+  const players=S.players.filter(p=>p.conn || NET.mode==='local'), observers=(S.observers||[]).filter(o=>o.conn);
+  S = lobbyState(); S.players=players; S.observers=observers; S.seq=players.reduce((m,p)=>Math.max(m,+p.id.slice(1)),0);
   S.hostPid=NET.myPid;
 }
 
@@ -754,7 +760,7 @@ function drawCard(p, deck){
 }
 function doRoll(p){
   const d1=rnd6(), d2=rnd6(), dbl=d1===d2, sum=d1+d2;
-  S.roll=[d1,d2]; S.rollId++;
+  S.roll=[d1,d2]; S.rollId++; (S.rolled=S.rolled||{})[p.id]=true;
   log(`🎲 ${p.name} saca ${d1} + ${d2} = ${sum}${dbl?' (¡dobles!)':''}.`);
   if(p.jail){
     S.rolledDbl=false;
@@ -980,9 +986,9 @@ function botTick(){
     if(Date.now()-t.seen<1500) continue;
     const val=botTradeValue(b,t), valid=!validTrade(t);
     if(valid && val>0){ botChat(b,'¡Trato hecho! 🤝'); act(b.id,{type:'tradeAccept',id:t.id}); }
-    else if(valid && !t.counterOf && -val<=3000*K){
+    else if(valid && !t.counterOf && -val<=START_MONEY*2){
       // contraoferta: lo mismo, pero pidiendo un poco más de plata (una sola vez por negocio)
-      const extra=Math.ceil((-val+1)/(100*K))*100*K;
+      const extra=Math.ceil((-val+1)/(10*K))*10*K;
       const r=act(b.id,{type:'trade', to:t.from, gm:t.rm, gp:t.rp, gc:t.rc||0, rm:t.gm+extra, rp:t.gp, rc:t.gc||0, replaces:t.id});
       if(typeof r==='string'){ botChat(b,'Mmm… no me conviene.'); act(b.id,{type:'tradeReject',id:t.id}); }
       else botChat(b,`Así no me conviene… te hago una contraoferta: agregá ${fmt(extra)} 🔁`);
@@ -1044,6 +1050,7 @@ function publicState(forPid){
     delete p.token;
     if(s.phase==='play' && p.id!==forPid){ p.neg = p.money<0; p.money=null; delete p.bills; }
   });
+  (s.observers||[]).forEach(o=>delete o.token);
   return s;
 }
 function commit(){
@@ -1105,18 +1112,32 @@ function hostOnData(conn, d){
   if(!d || typeof d!=='object') return;
   if(d.t==='hello'){
     if(d.token===myToken) d.token+='-'+conn.peer;   // mismo navegador que el anfitrión (otra pestaña)
-    let p=S.players.find(x=>x.token===d.token);
-    if(!p){
-      if(S.phase!=='lobby'){ conn.send({t:'err', m:'La partida ya empezó. Pedile al anfitrión que te espere en la próxima.', fatal:true}); return setTimeout(()=>conn.close(),500); }
-      if(S.players.length>=6){ conn.send({t:'err', m:'La sala está llena (6 jugadores).', fatal:true}); return setTimeout(()=>conn.close(),500); }
-      p=addPlayer(d.name, d.emoji, d.token, conn.peer);
-      sysChat(`${p.emoji} ${p.name} entró a la sala.`);
-    } else {
-      sysChat(`${p.emoji} ${p.name} se reconectó.`);
-    }
-    if(NET.conns[p.id] && NET.conns[p.id]!==conn) try{ NET.conns[p.id].close(); }catch(e){}
-    conn.pid=p.id; NET.conns[p.id]=conn; p.conn=true; p.peerId=conn.peer; p.mic=false; delete p.offAt;
-    conn.send({t:'welcome', pid:p.id, code:NET.code});
+    S.observers=S.observers||[];
+    let p=S.players.find(x=>x.token===d.token), ob=null, why='';
+    if(!p) ob=S.observers.find(x=>x.token===d.token)||null;
+    if(!p && !ob){
+      // se puede jugar si hay lugar y la partida no avanzó (en la sala, o antes de que todos hayan tirado una vez)
+      const canPlay = S.players.length<6 && (S.phase==='lobby' || (S.phase==='play' && !firstRoundDone()));
+      if(canPlay){
+        const err=nameEmojiTaken(d.name, d.emoji);
+        if(err){ conn.send({t:'err', m:err, fatal:true, taken:takenInfo(), code:NET.code}); return setTimeout(()=>conn.close(),500); }
+        p=addPlayer(d.name, d.emoji, d.token, conn.peer);
+        if(S.phase==='play') joinMidGame(p);
+        sysChat(`${p.emoji} ${p.name} entró ${S.phase==='play'?'a la partida':'a la sala'}.`);
+      } else {
+        why = S.phase==='lobby' || S.players.length>=6 ? 'La sala está llena (6 jugadores): entraste como observador 👀.'
+            : S.phase==='over' ? 'La partida ya terminó: entraste como observador 👀.'
+            : 'La partida ya avanzó (todos tiraron los dados): entraste como observador 👀.';
+        ob={id:'o'+(++S.seq), name:(String(d.name||'').trim()||'Invitado').slice(0,16), emoji:'👀', token:d.token, peerId:conn.peer, conn:true};
+        S.observers.push(ob); sysChat(`👀 ${ob.name} entró a mirar la partida.`);
+      }
+    } else if(p) sysChat(`${p.emoji} ${p.name} se reconectó.`);
+    else { why='Volviste como observador 👀.'; sysChat(`👀 ${ob.name} volvió a mirar.`); }
+    const who=p||ob;
+    if(NET.conns[who.id] && NET.conns[who.id]!==conn) try{ NET.conns[who.id].close(); }catch(e){}
+    conn.pid=who.id; NET.conns[who.id]=conn; who.conn=true; who.peerId=conn.peer;
+    if(p){ p.mic=false; delete p.offAt; conn.send({t:'welcome', pid:p.id, code:NET.code}); }
+    else conn.send({t:'welcome', pid:null, obs:ob.id, why, code:NET.code});
     conn.send({t:'chatlog', list:CHAT.slice(-80)});
     commit(); return;
   }
@@ -1124,9 +1145,27 @@ function hostOnData(conn, d){
   if(d.t==='act'){ const r=act(pid, d.a||{}); if(typeof r==='string') conn.send({t:'err', m:r}); }
   else if(d.t==='chat'){ addChat(pid, d.text); }
 }
+// nombres y fichas no se pueden repetir
+function nameEmojiTaken(name, emoji){
+  const n=(String(name||'').trim()||'Jugador').slice(0,16).toLowerCase();
+  const sameName=S.players.find(x=>x.name.toLowerCase()===n);
+  if(sameName) return `Ya hay un jugador llamado “${sameName.name}”. Elegí otro nombre.`;
+  const sameTok=S.players.find(x=>x.emoji===emoji);
+  if(sameTok) return `La ficha ${emoji} ya la eligió ${sameTok.name}. Elegí otra ficha.`;
+  if(!EMOJIS.includes(emoji)) return 'Elegí una ficha.';
+  return null;
+}
+const takenInfo = () => ({names:S.players.map(x=>x.name), emojis:S.players.map(x=>x.emoji)});
+function firstRoundDone(){ return S.phase==='play' && alive().every(p=>S.rolled && S.rolled[p.id]); }
+function joinMidGame(p){   // entra a una partida que ya empezó (antes de que todos hayan tirado)
+  Object.assign(p,{money:START_MONEY, bills:billsOf(START_MONEY), pos:0, jail:false, jailT:0, jcards:[], bk:false, cred:null});
+  log(`➕ ${p.name} se suma a la partida con ${fmt(START_MONEY)}. Juega al final de la ronda.`);
+}
 function hostOnClose(conn){
   const pid=conn.pid; if(!pid || NET.conns[pid]!==conn) return;
   delete NET.conns[pid];
+  const ob=(S.observers||[]).find(x=>x.id===pid);
+  if(ob){ ob.conn=false; S.observers=S.observers.filter(x=>x!==ob); sysChat(`👀 ${ob.name} dejó de mirar.`); commit(); return; }
   const p=P(pid); if(!p) return;
   if(S.phase==='lobby'){ S.players=S.players.filter(x=>x!==p); sysChat(`${p.name} salió de la sala.`); }
   else { p.conn=false; p.mic=false; p.offAt=Date.now(); sysChat(`${p.emoji} ${p.name} se desconectó.${p.bk?'':' El anfitrión puede esperarlo o sacarlo de la partida.'}`); }
@@ -1134,7 +1173,8 @@ function hostOnClose(conn){
 }
 function addChat(pid, text){
   text=String(text||'').trim().slice(0,300); if(!text) return;
-  const p=P(pid); const m={n:p.name, e:p.emoji, c:p.color, x:text};
+  const p=P(pid) || (S.observers||[]).find(x=>x.id===pid); if(!p) return;
+  const m={n:p.name+(p.id[0]==='o'?' (mirando)':''), e:p.emoji, c:p.color||'#666', x:text};
   pushChat(m);
 }
 function sysChat(x){ pushChat({sys:true, x}); }
@@ -1171,11 +1211,16 @@ function connectHost(){
   c.on('close', ()=>{ if(NET.mode!=='client' || NET.hostConn!==c) return; netBar(true,'Se perdió la conexión con el anfitrión. Reconectando…'); setTimeout(connectHost,3000); });
 }
 function clientOnData(d){
-  if(d.t==='welcome'){ NET.myPid=d.pid; NET.welcomed=true; store('bnq_client',{code:NET.code, at:Date.now()}); if(location.hash!=='#'+NET.code) history.replaceState(null,'','#'+NET.code); }
+  if(d.t==='welcome'){ NET.myPid=d.pid; NET.obs=d.obs||null; NET.welcomed=true; NET.taken=null; store('bnq_client',{code:NET.code, at:Date.now()}); if(location.hash!=='#'+NET.code) history.replaceState(null,'','#'+NET.code);
+    if(d.why && !NET.obsToasted){ NET.obsToasted=true; toast(d.why); } }
   else if(d.t==='state'){ S=d.s; render(); }
   else if(d.t==='chat'){ CHAT.push(d.m); renderChat(d.m); }
   else if(d.t==='chatlog'){ CHAT=d.list||[]; renderChat(); }
-  else if(d.t==='err'){ toast(d.m); if(d.fatal){ NET.mode=null; leaveToMenu(); } }
+  else if(d.t==='err'){
+    toast(d.m);
+    if(d.taken){ NET.taken={...d.taken, code:d.code}; }   // nombres y fichas ocupados en esa sala
+    if(d.fatal){ NET.mode=null; leaveToMenu(); if(d.taken){ renderTokenPicker(); $('#joinCode').value=d.code||''; if(d.taken.names.some(n=>n.toLowerCase()===myName().toLowerCase())) $('#myName').focus(); } }
+  }
 }
 function netBar(on,txt){ const b=$('#netbar'); b.style.display=on?'block':'none'; if(txt) b.textContent=txt; }
 
@@ -1230,7 +1275,7 @@ function renderVoice(){
   const b=$('#btnMic'); b.textContent = VOICE.stream ? '🎤 Micrófono ACTIVO (tocá para apagar)' : '🎤 Activar micrófono';
   b.classList.toggle('mic-on', !!VOICE.stream); b.classList.toggle('gray', !VOICE.stream);
   $('#btnSpk').textContent = VOICE.muted ? '🔇' : '🔊';
-  $('#voiceBar').style.display = NET.mode==='local' ? 'none' : 'flex';
+  $('#voiceBar').style.display = NET.mode==='local' || NET.obs ? 'none' : 'flex';
 }
 
 /* ====================== INTERFAZ ====================== */
@@ -1239,8 +1284,12 @@ let selEmoji = load('bnq_emoji') || EMOJIS[0];
 function myName(){ return $('#myName').value.trim() || 'Jugador'; }
 function myEmoji(){ return selEmoji; }
 function renderTokenPicker(){
-  $('#myTokens').innerHTML = EMOJIS.map(e=>`<button class="tok ${e===selEmoji?'sel':''}" data-e="${e}">${e}</button>`).join('');
-  $('#myTokens').querySelectorAll('.tok').forEach(b=>b.onclick=()=>{ selEmoji=b.dataset.e; store('bnq_emoji',selEmoji); renderTokenPicker(); });
+  // si una sala nos rechazó, marcar las fichas que ya están ocupadas ahí
+  const taken = NET.taken ? NET.taken.emojis : [];
+  if(taken.includes(selEmoji)){ const free=EMOJIS.find(e=>!taken.includes(e)); if(free){ selEmoji=free; store('bnq_emoji',selEmoji); } }
+  $('#myTokens').innerHTML = EMOJIS.map(e=>`<button class="tok ${e===selEmoji?'sel':''} ${taken.includes(e)?'taken':''}" data-e="${e}" title="${taken.includes(e)?'Ocupada en la sala '+NET.taken.code:''}">${e}</button>`).join('')
+    + (NET.taken ? `<div class="muted" style="width:100%;margin-top:4px">En la sala <b>${NET.taken.code}</b> ya están: ${NET.taken.names.map(esc).join(', ')}. Las fichas tachadas están ocupadas.</div>` : '');
+  $('#myTokens').querySelectorAll('.tok').forEach(b=>b.onclick=()=>{ if(b.classList.contains('taken')) return toast('Esa ficha ya la eligió otro jugador.'); selEmoji=b.dataset.e; store('bnq_emoji',selEmoji); renderTokenPicker(); });
 }
 
 function render(){
@@ -1255,12 +1304,13 @@ function renderLobby(){
   $('#lobbyCode').textContent=NET.code||'';
   $('#lobbyCount').textContent=S.players.length;
   const isHost = NET.mode==='host';
-  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}${p.bot&&isHost?`<button class="btn sm gray" onclick="doAct({type:'removeBot',id:'${p.id}'})">✕</button>`:''}</li>`).join('');
+  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}${p.bot&&isHost?`<button class="btn sm gray" onclick="doAct({type:'removeBot',id:'${p.id}'})">✕</button>`:''}</li>`).join('')
+    + ((S.observers||[]).length ? `<li style="background:#eef3ff">👀 <span style="flex:1">Mirando: ${S.observers.map(o=>esc(o.name)+(o.id===NET.obs?' (vos)':'')).join(', ')}</span></li>` : '');
   $('#btnAddBot').style.display = isHost ? 'block' : 'none';
   $('#btnAddBot').disabled = S.players.length>=6;
   $('#btnStart').style.display = isHost ? 'block' : 'none';
   $('#btnStart').disabled = S.players.length<2;
-  $('#lobbyWait').textContent = isHost ? (S.players.length<2?'Se necesitan al menos 2 jugadores.':'') : 'Esperando que el anfitrión empiece la partida…';
+  $('#lobbyWait').textContent = isHost ? (S.players.length<2?'Se necesitan al menos 2 jugadores.':'') : NET.obs ? '👀 La sala está llena: vas a mirar la partida como observador.' : 'Esperando que el anfitrión empiece la partida…';
 }
 
 function cellPos(i){
@@ -1524,7 +1574,7 @@ function showBank(refresh){
     <p class="muted" style="margin-top:0">Cambiá billetes grandes por más chicos para tener sencillo. El total no cambia: siguen siendo ${fmt(p.money)}.</p>
     <div class="plabel">Tus billetes — tocá el que querés cambiar:</div>
     <div class="bills pickrow">${BILLS.filter(b=>bl[b.v]>0).map(b=>billChip(b.v,bl[b.v], CHANGE_OPTS[b.v]?`bankSel=${b.v};showBank(true)`:'', (CHANGE_OPTS[b.v]?'pickable':'')+(bankSel===b.v?' chosen':''))).join('')}</div>`;
-  if(!can.length) h+='<p class="muted">Ya tenés todo en billetes de ₲ 10.000: no hay nada más chico.</p>';
+  if(!can.length) h+='<p class="muted">Ya tenés todo en monedas de ₲ 1.000: no hay nada más chico.</p>';
   else if(!bankSel) h+='<p class="pmsg ok">Elegí un billete de arriba.</p>';
   else {
     h+=`<div class="plabel">Cambiar 1 billete de ${fmt(bankSel)} por:</div>`;
@@ -1537,7 +1587,7 @@ function showBank(refresh){
 // --- pagar con billetes y dar vuelto ---
 let openedRent=null, rentTimer=null, PICK={key:null, sel:{}, exch:false};
 function billChip(v, n, onclick, cls){
-  return `<div class="bill ${n>1?'stack':''} ${cls||''}" style="--bc:${BILL_COLOR[v]}" ${onclick?`onclick="${onclick}"`:''}><span class="bseal">₲</span><span class="bv">${billLabel(v)}</span><span class="bn">×${n}</span></div>`;
+  return `<div class="bill ${n>1?'stack':''} ${isCoin(v)?'coin':''} ${cls||''}" style="--bc:${BILL_COLOR[v]}" ${onclick?`onclick="${onclick}"`:''}><span class="bseal">₲</span><span class="bv">${billLabel(v)}</span><span class="bn">×${n}</span></div>`;
 }
 function showRentPicker(refresh){
   const r=$('#modalRoot'), R=S && S.rent;
@@ -1685,6 +1735,12 @@ function renderWallet(){
       <button class="btn sm gray wide" style="margin-top:8px" onclick="confirmLeave()">🏠 Salir al inicio</button></div>`;
     return;
   }
+  if(!p && NET.obs){   // entró a mirar (sala llena o partida avanzada)
+    w.style.display='block';
+    w.innerHTML=`<div class="observer">👀 <b>Estás mirando como observador.</b><br>La partida ya estaba llena o avanzada: ves el tablero y podés usar el chat, pero no jugás.
+      <button class="btn sm gray wide" style="margin-top:8px" onclick="confirmLeave()">🏠 Salir al inicio</button></div>`;
+    return;
+  }
   if(!p || p.bk){ w.innerHTML=''; w.style.display='none'; return; }
   w.style.display='block';
   w.innerHTML=`<h4><span>💵 ${NET.mode==='local'?'Billetes de '+esc(p.name):'Tus billetes'}</span><span>${fmt(p.money)}</span></h4>${walletHTML(p)}
@@ -1701,6 +1757,7 @@ function renderPlayers(){
       <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.kicked?' · 🚪 lo sacaron':p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${!p.bk&&!p.conn&&!p.bot&&NET.mode!=='local'?' '+offAgo(p):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
       <span class="mo ${isNeg(p)?'neg':''}">${moneyText(p)}</span></div>`;
   }).join('');
+  if((S.observers||[]).length) $('#players').insertAdjacentHTML('beforeend', `<div class="muted" style="padding:2px 6px">👀 Mirando: ${S.observers.map(o=>esc(o.name)+(o.id===NET.obs?' (vos)':'')).join(', ')}</div>`);
   // cartelito +/− cuando cambia la plata
   for(const p of S.players){
     if(!seesMoney(p)){ delete prevMoney[p.id]; continue; }
@@ -1767,9 +1824,9 @@ function propInfo(i){
   } else if(sp.t==='tr'){
     h+=`<table class="rt">${[1,2,3,4].map(n=>`<tr><td>Si el dueño tiene ${n} transporte${n>1?'s':''}</td><td>${fmt([0,25,50,100,200][n]*K)}</td></tr>`).join('')}<tr><td>Precio</td><td>${fmt(sp.p*K)}</td></tr><tr><td>Valor de hipoteca</td><td>${fmt(mortValue(i))}</td></tr></table>`;
   } else if(sp.t==='ut'){
-    h+=`<p style="font-size:14px">Con 1 servicio: el alquiler es <b>4 × lo que sacó en los dados × ₲ 10.000</b>.<br>Con ANDE y ESSAP: <b>10 × dados × ₲ 10.000</b>.</p><table class="rt"><tr><td>Precio</td><td>${fmt(sp.p*K)}</td></tr><tr><td>Valor de hipoteca</td><td>${fmt(mortValue(i))}</td></tr></table>`;
+    h+=`<p style="font-size:14px">Con 1 servicio: el alquiler es <b>4 × lo que sacó en los dados × ₲ 1.000</b>.<br>Con ANDE y ESSAP: <b>10 × dados × ₲ 1.000</b>.</p><table class="rt"><tr><td>Precio</td><td>${fmt(sp.p*K)}</td></tr><tr><td>Valor de hipoteca</td><td>${fmt(mortValue(i))}</td></tr></table>`;
   } else {
-    const txt={go:'Cada vez que pasás o caés en la Salida cobrás ₲ 2.000.000.',jail:'Si caés acá estás solo de visita. Si te mandan preso, salís pagando ₲ 500.000, con la tarjeta “Salga libre” o sacando dobles (máximo 3 intentos).',
+    const txt={go:'Cada vez que pasás o caés en la Salida cobrás ₲ 200.000.',jail:'Si caés acá estás solo de visita. Si te mandan preso, salís pagando ₲ 50.000, con la tarjeta “Salga libre” o sacando dobles (máximo 3 intentos).',
       free:'Descanso: tomate un tereré, acá no pasa nada.',gojail:'¡Directo a Tacumbú! No pasás por la Salida.',cc:'Sacá una tarjeta de Cuenta Corriente.',ca:'Sacá una tarjeta de Caja de Ahorros.',tax:'Pagá '+fmt((sp.a||0)*K)+' al Banco.'}[sp.t];
     h+=`<p>${txt}</p>`;
   }
@@ -1816,7 +1873,7 @@ function titleCard(i){
     head=`<div class="th dark"><span class="tic">${sp.ic}</span><small>SERVICIO PÚBLICO</small><b>${sp.n}</b></div>`;
     const n=o?countType(pid,'ut'):0;
     body = `<div class="tr2${n===1?' now':''}"><span>Con 1 servicio</span><b>4 × dados</b></div><div class="tr2${n===2?' now':''}"><span>Con ANDE y ESSAP</span><b>10 × dados</b></div>
-      <div class="muted" style="font-size:10.5px;padding:2px">(× ₲ 10.000 por cada punto de los dados)</div><div class="tsep"></div>` + row('Valor de hipoteca',mortValue(i));
+      <div class="muted" style="font-size:10.5px;padding:2px">(× ₲ 1.000 por cada punto de los dados)</div><div class="tsep"></div>` + row('Valor de hipoteca',mortValue(i));
   }
   const rn=rentNow(i);
   body += o ? `<div class="rentbox">Si alguien cae hoy paga:<b>${rn.txt}</b></div>`
@@ -1913,6 +1970,7 @@ function showTrade(target, ctx){
   if(!S || S.phase!=='play') return;
   TRADE_CTX = ctx || {};
   const me=TRADE_CTX.from || meId(), others=alive().filter(p=>p.id!==me);
+  if(!me || !P(me)) return toast('Estás mirando como observador: no podés negociar.');
   if(P(me).bk) return toast('Estás en quiebra.');
   if(!others.length) return;
   target = target || others[0].id;
@@ -1925,8 +1983,8 @@ function showTrade(target, ctx){
     <label style="font-size:13px;font-weight:700">Con:</label>
     <select id="trTo" ${counter?'disabled':''} onchange="showTrade(this.value,{from:'${me}'})">${others.map(p=>`<option value="${p.id}" ${p.id===target?'selected':''}>${p.emoji} ${esc(p.name)}</option>`).join('')}</select>
     <div class="tcols">
-      <div><h4>${NET.mode==='local'?esc(P(me).name)+' da':'Vos das'}</h4><input type="number" id="trGm" min="0" step="100000" placeholder="₲ dinero" value="${pf.gm||''}">${chk(me,'trGp',pf.gp,pf.gc)}</div>
-      <div><h4>Pedís a ${esc(T.name)}</h4><input type="number" id="trRm" min="0" step="100000" placeholder="₲ dinero" value="${pf.rm||''}">${chk(target,'trRp',pf.rp,pf.rc)}</div>
+      <div><h4>${NET.mode==='local'?esc(P(me).name)+' da':'Vos das'}</h4><input type="number" id="trGm" min="0" step="10000" placeholder="₲ dinero" value="${pf.gm||''}">${chk(me,'trGp',pf.gp,pf.gc)}</div>
+      <div><h4>Pedís a ${esc(T.name)}</h4><input type="number" id="trRm" min="0" step="10000" placeholder="₲ dinero" value="${pf.rm||''}">${chk(target,'trRp',pf.rp,pf.rc)}</div>
     </div>
     <p class="muted">Tip: activá el micrófono o usá el chat para negociar. Las calles con casas no se pueden negociar (vendé las casas primero).</p>
     <button class="btn green wide" onclick="sendTrade()">${counter?'🔁 Enviar contraoferta':'Enviar oferta'}</button>`;
@@ -1969,8 +2027,9 @@ function showRules(){
   <h4>Propiedades</h4><ul><li>Si caés en una calle, transporte o servicio libre, podés comprarlo al Banco. Si no lo comprás, queda en el Banco.</li>
   <li>Si tiene dueño, pagás alquiler. Con el grupo de color completo el alquiler se duplica.</li>
   <li>Con el grupo completo podés construir casas (hasta 4) y luego un hotel, construyendo parejo.</li>
-  <li>Transportes: ${fmt(250000)} / 500.000 / 1.000.000 / 2.000.000 según cuántos tenga el dueño.</li>
-  <li>ANDE y ESSAP: 4 × dados × ₲10.000 (10 × si tiene los dos).</li></ul>
+  <li>Transportes: ${[25,50,100,200].map(v=>fmt(v*K)).join(' / ')} según cuántos tenga el dueño.</li>
+  <li>Billetes: ₲ 100.000, 50.000, 20.000, 10.000, 5.000 y 2.000, más monedas de ₲ 1.000 para poder dar cualquier vuelto.</li>
+  <li>ANDE y ESSAP: 4 × dados × ₲1.000 (10 × si tiene los dos).</li></ul>
   <h4>Pagar el alquiler en mano</h4><p>Cuando caés en la propiedad de otro, elegís qué billetes le entregás. Si das de más, el dueño elige los billetes del vuelto. Si a alguien le falta cambio, puede cambiar un billete grande en el Banco. También existe “Pagar automático” y “Vuelto automático”. Si el dueño tarda más de 30 segundos, el que pagó puede pedir el vuelto automático.</p>
   <h4>Tarjetas</h4><p><b>Cuenta Corriente</b> 💳 y <b>Caja de Ahorros</b> 🏦: 16 tarjetas cada una, con premios, multas, avances y “Salga libre de Tacumbú”.</p>
   <h4>Tacumbú (cárcel)</h4><p>Para salir: pagás ${fmt(JAIL_FINE)}, usás la tarjeta “Salga libre” o sacás dobles. Al tercer intento fallido pagás la fianza y salís.</p>
@@ -1984,7 +2043,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
-  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null;
+  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
   // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
   [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
   prevOwned=prevHouses=null; prevWallet={pid:null, bills:null}; shownRoll=-1; lastTurnPid=null;
@@ -2007,6 +2066,9 @@ function toggleLocalBot(k){
   renderLocalNames();
 }
 function startLocal(){
+  const names=localNames.map((p,k)=>(p.n||'Jugador '+(k+1)).trim().toLowerCase());
+  const dup=names.find((n,k)=>names.indexOf(n)!==k);
+  if(dup) return toast(`Hay dos jugadores llamados “${dup}”. Cada jugador tiene que tener un nombre distinto.`);
   NET.mode='local'; S=lobbyState();
   localNames.forEach((p,k)=>addPlayer(p.n||('Jugador '+(k+1)), EMOJIS[k], 'local'+k, null, p.bot));
   S.hostPid=S.players[0].id;
@@ -2021,13 +2083,13 @@ function refreshResume(){
   const items=[], recent=(x,h)=>x && Date.now()-x.at < h*3600e3;
   const names=s=>s.players.map(p=>(p.bot?'🤖':'')+p.name).join(', ');
   const h=load('bnq_host');
-  if(recent(h,72) && h.S && h.S.phase==='play') items.push(`<p class="muted" style="margin:0 0 6px">🌐 Sala <b>${h.code}</b> (vos sos el anfitrión) · ${esc(names(h.S))}</p>
+  if(recent(h,72) && h.S && h.S.phase==='play' && h.S.ver===2) items.push(`<p class="muted" style="margin:0 0 6px">🌐 Sala <b>${h.code}</b> (vos sos el anfitrión) · ${esc(names(h.S))}</p>
     <button class="btn green wide" onclick="hostStart(true)">▶ Reanudar como anfitrión</button>`);
   const c=load('bnq_client');
   if(recent(c,12) && c.code && !(h && h.code===c.code)) items.push(`<p class="muted" style="margin:10px 0 6px">🌐 Sala <b>${c.code}</b> de un amigo</p>
     <button class="btn green wide" onclick="resumeClient('${c.code}')">▶ Volver a la sala ${c.code}</button>`);
   const l=load('bnq_local');
-  if(recent(l,72) && l.S && l.S.phase==='play') items.push(`<p class="muted" style="margin:10px 0 6px">📱 En este dispositivo · ${esc(names(l.S))}</p>
+  if(recent(l,72) && l.S && l.S.phase==='play' && l.S.ver===2) items.push(`<p class="muted" style="margin:10px 0 6px">📱 En este dispositivo · ${esc(names(l.S))}</p>
     <button class="btn green wide" onclick="resumeLocal()">▶ Continuar partida</button>`);
   $('#resumeBox').style.display = items.length ? 'block' : 'none';
   $('#resumeList').innerHTML = items.join('');
@@ -2046,7 +2108,8 @@ function confirmLeave(){
   const playing = me && !me.bk && !me.bot;
   const msg = NET.mode==='host' && S.phase!=='lobby' ? 'La partida queda guardada en este dispositivo. Tus amigos quedan esperando hasta que vuelvas con “Reanudar como anfitrión”.'
     : NET.mode==='host' ? 'Se cierra la sala y tus amigos salen de ella.'
-    : NET.mode==='client' ? (me&&me.bk ? 'Salís de la sala. Si volvés con “Volver a la sala”, entrás como observador.' : 'Salís de la sala un rato. Podés volver con “Volver a la sala” y recuperás tu lugar.')
+    : NET.mode==='client' && NET.obs ? 'Dejás de mirar la partida. Podés volver a mirarla con “Volver a la sala”.'
+    : NET.mode==='client' ? (me&&me.bk ?'Salís de la sala. Si volvés con “Volver a la sala”, entrás como observador.' : 'Salís de la sala un rato. Podés volver con “Volver a la sala” y recuperás tu lugar.')
     : 'La partida queda guardada. Podés seguirla con “Continuar partida”.';
   let h=`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">${playing?'Salir un rato (sigo jugando después)':'Sí, volver al inicio'}</button>`;
   if(playing) h+=`<div class="observer" style="margin-top:14px"><b>🏳️ ¿Tenés que irte y no vas a volver a jugar?</b><br>Podés retirarte de la partida: te declarás en bancarrota y los demás siguen jugando sin esperarte.
