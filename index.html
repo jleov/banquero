@@ -156,6 +156,29 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .mbg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .modal{background:var(--cream);border-radius:14px;width:100%;max-width:440px;max-height:88vh;overflow:auto;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
 .modal h3{margin:0 0 8px}
+.modal.wide{max-width:980px}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.pills button{border:0;border-radius:20px;padding:7px 12px;background:#e2dcc6;font-weight:700;cursor:pointer;font-size:13px}
+.pills button.on{background:var(--blue);color:#fff}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+@media (max-width:480px){.tgrid{grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px}.tcard{font-size:11px}}
+.tcard{background:#fff;border:1px solid #444;border-radius:6px;padding:6px;position:relative;font-size:12px;display:flex;flex-direction:column;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.tcard.minecard{box-shadow:0 0 0 3px var(--oc),0 2px 6px rgba(0,0,0,.25)}
+.th{border:2px solid #222;color:#fff;text-align:center;padding:6px 4px;margin-bottom:4px;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.th small{display:block;font-size:9px;letter-spacing:1.5px}
+.th b{font-size:13.5px;text-transform:uppercase;line-height:1.15;display:block}
+.th.dark{background:#fff;color:#222;text-shadow:none}
+.tic{font-size:26px;display:block}
+.tr2{display:flex;justify-content:space-between;gap:4px;padding:2px 3px;border-bottom:1px dotted #ddd;border-radius:3px}
+.tr2.now{background:#fff1a8;font-weight:800}
+.tr2 b{white-space:nowrap}
+.tsep{height:5px}
+.tfoot{margin-top:auto;padding-top:6px}
+.owner{display:flex;align-items:center;gap:4px;font-weight:700;flex-wrap:wrap}
+.tcard.mort .tbody,.tcard.mort .th{opacity:.3}
+.stamp{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%) rotate(-18deg);border:3px solid var(--red);color:var(--red);font-weight:900;padding:2px 8px;font-size:16px;background:rgba(255,255,255,.9);border-radius:4px;letter-spacing:1px}
+.tbtns{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tbtns .btn{flex:1 1 auto;font-size:12px;padding:6px}
 .rt{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0}
 .rt td{padding:3px 4px;border-bottom:1px solid #e3dcc3}.rt td:last-child{text-align:right;font-weight:700}
 .prow{display:flex;align-items:center;gap:6px;background:#fff;border-radius:8px;padding:6px;margin:4px 0;font-size:13px;flex-wrap:wrap}
@@ -250,6 +273,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
         <div class="players" id="players"></div>
         <div class="tools" style="margin-top:8px">
           <button class="btn sm" onclick="showMyProps()">🏠 Propiedades</button>
+          <button class="btn sm" style="background:#2a9d3f" onclick="showTitles()">🃏 Títulos</button>
           <button class="btn sm gold" onclick="showTrade()">🤝 Negociar</button>
           <button class="btn sm gray" onclick="showRules()">📜 Reglas</button>
           <button class="btn sm gray" id="btnSfx" style="flex:0 0 auto" onclick="toggleSfx()" title="Sonidos del juego">🎵</button>
@@ -447,8 +471,10 @@ function canSell(pid,i){
   if(sp.t!=='st' || !o || o.o!==pid || o.h===0) return false;
   return o.h >= Math.max(...groupIdx(sp.g).map(j=>S.props[j].h));
 }
-function canMort(pid,i){ const o=S.props[i]; return !!o && o.o===pid && !o.m && (B[i].t!=='st' || groupClear(B[i].g)); }
-function canUnmort(pid,i){ const o=S.props[i]; return !!o && o.o===pid && o.m && P(pid).money>=unmortCost(i); }
+// hipotecar y levantar hipotecas: solo durante el propio turno
+const isTurnOf = pid => S.phase==='play' && cur().id===pid;
+function canMort(pid,i){ const o=S.props[i]; return !!o && o.o===pid && !o.m && isTurnOf(pid) && (B[i].t!=='st' || groupClear(B[i].g)); }
+function canUnmort(pid,i){ const o=S.props[i]; return !!o && o.o===pid && o.m && isTurnOf(pid) && P(pid).money>=unmortCost(i); }
 function tradable(i){ const o=S.props[i]; return !!o && (B[i].t!=='st' || groupClear(B[i].g)); }
 
 function rentOf(i,dice,mode){
@@ -658,9 +684,9 @@ function act(pid, a){
       { const c=GROUPS[B[i].g].h*K; p.money-=c; S.props[i].h++; log(`🏠 ${p.name} construye ${S.props[i].h===5?'un hotel':'una casa'} en ${B[i].n} (${fmt(c)}).`); } break;
     case 'sell': if(!canSell(pid,i)) return 'No se puede vender ahí.';
       { const c=GROUPS[B[i].g].h*K/2; p.money+=c; S.props[i].h--; log(`${p.name} vende una construcción de ${B[i].n} (+${fmt(c)}).`); } break;
-    case 'mort': if(!canMort(pid,i)) return 'No se puede hipotecar (vendé primero las casas del grupo).';
+    case 'mort': if(!turn) return 'Solo podés hipotecar durante tu turno.'; if(!canMort(pid,i)) return 'No se puede hipotecar (vendé primero las casas del grupo).';
       S.props[i].m=true; p.money+=mortValue(i); log(`${p.name} hipoteca ${B[i].n} (+${fmt(mortValue(i))}).`); break;
-    case 'unmort': if(!canUnmort(pid,i)) return 'No te alcanza para levantar la hipoteca.';
+    case 'unmort': if(!turn) return 'Solo podés levantar una hipoteca durante tu turno.'; if(!canUnmort(pid,i)) return 'No te alcanza para levantar la hipoteca.';
       S.props[i].m=false; p.money-=unmortCost(i); log(`${p.name} levanta la hipoteca de ${B[i].n} (${fmt(unmortCost(i))}).`); break;
     case 'bankrupt': goBankrupt(p); break;
     case 'trade': {
@@ -1198,7 +1224,7 @@ function renderGame(){
   if(prevOwned!=null && owned>prevOwned) SFX.buy(); else if(prevHouses!=null && houses>prevHouses) SFX.build();
   prevOwned=owned; prevHouses=houses;
   renderCenter(); renderPlayers(); renderTrades();
-  const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true);
+  const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true); if(m.dataset.kind==='titles') showTitles(null, true);
 }
 
 function renderCenter(){
@@ -1329,9 +1355,9 @@ function sendChat(){
 }
 
 // --- modales ---
-function modal(html, kind, extra){
+function modal(html, kind, extra, wide){
   const r=$('#modalRoot'); r.dataset.kind=kind||''; r.dataset.i=extra==null?'':extra;
-  r.innerHTML=`<div class="mbg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}<div style="margin-top:12px"><button class="btn gray wide" onclick="closeModal()">Cerrar</button></div></div></div>`;
+  r.innerHTML=`<div class="mbg" onclick="if(event.target===this)closeModal()"><div class="modal${wide?' wide':''}">${html}<div style="margin-top:12px"><button class="btn gray wide" onclick="closeModal()">Cerrar</button></div></div></div>`;
 }
 function closeModal(){ const r=$('#modalRoot'); r.innerHTML=''; r.dataset.kind=''; }
 function propInfo(i){
@@ -1369,7 +1395,74 @@ function propButtons(i){
 }
 function showProp(i, refresh){
   if(refresh && $('#modalRoot').dataset.kind!=='prop') return;
-  modal(propInfo(i) + (S && S.props ? propButtons(i) : ''), 'prop', i);
+  const link = S && S.props && B[i].p ? `<button class="btn sm gold wide" style="margin-top:10px" onclick="showTitles()">🃏 Ver todos los títulos</button>` : '';
+  modal(propInfo(i) + (S && S.props ? propButtons(i) : '') + link, 'prop', i);
+}
+
+// --- títulos de propiedad (como las tarjetas del juego de mesa) ---
+const TITLE_IDX = range(40).filter(i=>B[i].p);
+function titleCard(i){
+  const sp=B[i], o=S.props[i], owner=o?P(o.o):null, pid=o?o.o:null;
+  const mine = o && canAct(pid) && !owner.bk;
+  const row=(label,val,now)=>`<div class="tr2${now?' now':''}"><span>${label}</span><b>${fmt(val)}</b></div>`;
+  let head, body='';
+  if(sp.t==='st'){
+    head=`<div class="th" style="background:${GROUPS[sp.g].c}"><small>TÍTULO DE PROPIEDAD</small><b>${sp.n}</b></div>`;
+    const lvl = !o ? -1 : o.h>0 ? o.h+1 : (ownsGroup(pid,sp.g)?1:0);
+    body = row('Alquiler',sp.r[0]*K,lvl===0) + row('Con grupo completo',sp.r[0]*K*2,lvl===1)
+      + [1,2,3,4].map(n=>row(`Con ${n} casa${n>1?'s':''}`,sp.r[n]*K,lvl===n+1)).join('') + row('Con hotel',sp.r[5]*K,lvl===6)
+      + `<div class="tsep"></div>` + row('Casa / hotel cuesta',GROUPS[sp.g].h*K) + row('Valor de hipoteca',mortValue(i));
+  } else if(sp.t==='tr'){
+    head=`<div class="th dark"><span class="tic">${sp.ic}</span><small>TRANSPORTE</small><b>${sp.n}</b></div>`;
+    const n=o?countType(pid,'tr'):0;
+    body = [1,2,3,4].map(k=>row(`Con ${k} transporte${k>1?'s':''}`,[0,25,50,100,200][k]*K,n===k)).join('') + `<div class="tsep"></div>` + row('Valor de hipoteca',mortValue(i));
+  } else {
+    head=`<div class="th dark"><span class="tic">${sp.ic}</span><small>SERVICIO PÚBLICO</small><b>${sp.n}</b></div>`;
+    const n=o?countType(pid,'ut'):0;
+    body = `<div class="tr2${n===1?' now':''}"><span>Con 1 servicio</span><b>4 × dados</b></div><div class="tr2${n===2?' now':''}"><span>Con ANDE y ESSAP</span><b>10 × dados</b></div>
+      <div class="muted" style="font-size:10.5px;padding:2px">(× ₲ 10.000 por cada punto de los dados)</div><div class="tsep"></div>` + row('Valor de hipoteca',mortValue(i));
+  }
+  let foot = o ? `<div class="owner"><span class="dot" style="background:${owner.color}"></span>${owner.emoji} ${esc(owner.name)}${o.h?` · ${o.h===5?'🏨 hotel':'🏠×'+o.h}`:''}</div>`
+               : `<div class="owner muted">🏦 Del Banco · ${fmt(sp.p*K)}</div>`;
+  if(mine && S.phase==='play'){
+    const b=[], myTurn=isTurnOf(pid);
+    if(sp.t==='st'){
+      if(canBuild(pid,i)) b.push(`<button class="btn green" onclick="doAct({type:'build',i:${i}},'${pid}')">+ ${o.h===4?'Hotel':'Casa'}</button>`);
+      if(canSell(pid,i)) b.push(`<button class="btn gray" onclick="doAct({type:'sell',i:${i}},'${pid}')">Vender casa</button>`);
+    }
+    if(o.m) b.push(`<button class="btn" ${canUnmort(pid,i)?'':'disabled'} onclick="doAct({type:'unmort',i:${i}},'${pid}')">Levantar hipoteca ${fmtS(unmortCost(i))}</button>`);
+    else b.push(`<button class="btn red" ${canMort(pid,i)?'':'disabled'} onclick="doAct({type:'mort',i:${i}},'${pid}')">Hipotecar +${fmtS(mortValue(i))}</button>`);
+    let why='';
+    if(!myTurn) why='Hipotecar: solo en tu turno';
+    else if(!o.m && sp.t==='st' && !groupClear(sp.g)) why='Vendé las casas del grupo para hipotecar';
+    else if(o.m && P(pid).money<unmortCost(i)) why='No te alcanza para levantarla';
+    foot += `<div class="tbtns">${b.join('')}</div>${why?`<div class="muted" style="font-size:11px;margin-top:3px">${why}</div>`:''}`;
+  }
+  return `<div class="tcard${o&&o.m?' mort':''}${mine?' minecard':''}" style="${o?`--oc:${owner.color}`:''}">${head}<div class="tbody">${body}</div>
+    ${o&&o.m?`<div class="stamp">HIPOTECADA</div>`:''}<div class="tfoot">${foot}</div></div>`;
+}
+function showTitles(filter, refresh){
+  const r=$('#modalRoot');
+  if(refresh && r.dataset.kind!=='titles') return;
+  if(!S || S.phase==='lobby') return;
+  filter = filter || (refresh ? r.dataset.i : null) || (ownedList(meId()).length ? 'mine' : 'all');
+  const me=meId();
+  const lists={
+    mine: TITLE_IDX.filter(i=>S.props[i] && S.props[i].o===me),
+    bank: TITLE_IDX.filter(i=>!S.props[i]),
+    others: TITLE_IDX.filter(i=>S.props[i] && S.props[i].o!==me),
+    all: TITLE_IDX
+  };
+  const names={mine:'Mis títulos', bank:'Del Banco', others:'De otros', all:'Todos'};
+  const list=lists[filter]||lists.all;
+  const mort=lists.mine.filter(i=>S.props[i].m).length;
+  const scroll = refresh ? (r.querySelector('.modal')||{}).scrollTop : 0;
+  let h=`<h3>🃏 Títulos de propiedad</h3>
+    <div class="pills">${Object.keys(names).map(k=>`<button class="${k===filter?'on':''}" onclick="showTitles('${k}')">${names[k]} (${lists[k].length})</button>`).join('')}</div>`;
+  if(filter==='mine') h+=`<p class="muted" style="margin:0 0 10px">Tenés ${lists.mine.length} título${lists.mine.length===1?'':'s'}${mort?`, ${mort} hipotecado${mort>1?'s':''}`:''}. ${isTurnOf(me)?'Es tu turno: podés hipotecar o levantar hipotecas.':'Las hipotecas se hacen durante tu turno.'}</p>`;
+  h+= list.length ? `<div class="tgrid">${list.map(titleCard).join('')}</div>` : '<p class="muted">No hay títulos en esta lista.</p>';
+  modal(h,'titles',filter,true);
+  if(scroll) r.querySelector('.modal').scrollTop=scroll;
 }
 function ownedList(pid){ return range(40).filter(i=>S.props[i] && S.props[i].o===pid); }
 function showMyProps(refresh){
@@ -1388,7 +1481,8 @@ function showMyProps(refresh){
     else if(canMort(pid,i)) b.push(`<button class="btn sm red" onclick="doAct({type:'mort',i:${i}},'${pid}')">Hipotecar +${fmtS(mortValue(i))}</button>`);
     h+=`<div class="prow"><span class="sw" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></span><span class="pn">${sp.ic||''} ${sp.n}<br><span class="muted">${o.m?'Hipotecada':o.h===5?'Hotel':o.h?o.h+' casa(s)':sp.t==='st'&&ownsGroup(pid,sp.g)?'Grupo completo':''}</span></span>${b.join('')}</div>`;
   }
-  h+='<p class="muted">Para construir necesitás todo el grupo de color, sin hipotecas, y construir parejo (una casa por calle a la vez).</p>';
+  h+=`<p class="muted">Para construir necesitás todo el grupo de color, sin hipotecas, y construir parejo (una casa por calle a la vez).${isTurnOf(pid)?'':' Las hipotecas se hacen solo durante tu turno.'}</p>
+    <button class="btn wide" style="background:#2a9d3f" onclick="showTitles('mine')">🃏 Ver mis títulos</button>`;
   modal(h,'props');
 }
 function showPlayer(pid){
