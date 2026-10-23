@@ -950,7 +950,8 @@ function act(pid, a){
     }
     case 'cardClose':   // solo el que sacó la tarjeta la cierra (o el anfitrión si se desconectó)
       if(!S.card || !S.card.open) return;
-      if(pid!==S.card.pid && !(pid===S.hostPid && !P(S.card.pid).conn)) return;
+      // la cierra quien la sacó; si la sacó un bot o alguien desconectado, la cierra el anfitrión
+      if(pid!==S.card.pid && !(pid===S.hostPid && (P(S.card.pid).bot || !P(S.card.pid).conn))) return;
       S.card.open=false;
       if(!S.rent && S.payQ && S.payQ.length) startNextPay();   // pagos de la tarjeta: empiezan al cerrarla
       break;
@@ -1020,7 +1021,8 @@ function botTick(){
   // tarjeta abierta: el bot la "lee" unos segundos y la cierra; mientras tanto nadie juega
   if(S.card && S.card.open){
     const d=P(S.card.pid);
-    if(d && d.bot && Date.now()>rollingUntil && Date.now()-S.card.at>3500) act(d.id,{type:'cardClose'});
+    // la tarjeta de un bot la cierra el anfitrión cuando todos la leyeron; si nadie la cierra en 2 minutos, se cierra sola
+    if(d && d.bot && Date.now()-S.card.at>120000) act(d.id,{type:'cardClose'});
     return;
   }
   // alquiler en mano: el bot paga con sus billetes o da el vuelto
@@ -2030,15 +2032,16 @@ function renderCardOverlay(){
   const r=$('#cardRoot'), c=S && S.phase==='play' ? S.card : null;
   if(!c || !c.open){ r.innerHTML=''; r.dataset.id=''; return; }
   const drawer=P(c.pid), mine=drawer && canAct(drawer.id);
-  const hostCanClose = !mine && NET.mode==='host' && drawer && !drawer.conn;
+  const hostCanClose = !mine && (NET.mode==='host' || NET.mode==='local') && drawer && (drawer.bot || !drawer.conn);
   const key=c.id+':'+(mine||hostCanClose);
   if(r.dataset.id===key) return;
   const isNew = !r.dataset.id || !r.dataset.id.startsWith(c.id+':');
   r.dataset.id=key;
   r.innerHTML=`<div class="cardov ${mine||hostCanClose?'':'watch'}"><div class="bigcard ${c.deck}${isNew?'':' noanim'}"><div class="ci">${c.deck==='cc'?'💳':'🏦'}</div><h2>${DECK_NAME[c.deck].toUpperCase()}</h2>${c.e?`<div class="cemo">${c.e}</div>`:''}
     <div>${mine?(NET.mode==='local'?esc(c.who)+', sacaste:':'Sacaste:'):esc(c.who)+' sacó:'}</div><p>${esc(c.x)}</p>
-    ${mine||hostCanClose?`<button class="btn wide" style="background:#fff;color:#222;font-size:16px" onclick="doAct({type:'cardClose'},'${c.pid}')">${mine?'✔ Entendido, cerrar':'Cerrar (jugador desconectado)'}</button>`
-          :`<small>⏳ Esperando que ${esc(c.who)} la lea y la cierre…</small>`}</div></div>`;
+    ${mine||hostCanClose?`<button class="btn wide" style="background:#fff;color:#222;font-size:16px" onclick="doAct({type:'cardClose'},'${c.pid}')">${mine?'✔ Entendido, cerrar':drawer.bot?`✔ Ya la leímos, cerrar`:'Cerrar (jugador desconectado)'}</button>
+           ${drawer.bot&&!mine?`<small>Es la tarjeta de un bot: cerrala cuando todos la hayan leído.</small>`:''}`
+          :`<small>⏳ Esperando que ${drawer&&drawer.bot?'el anfitrión cierre la tarjeta de '+esc(c.who):esc(c.who)+' la lea y la cierre'}…</small>`}</div></div>`;
   if(isNew) SFX.card();
 }
 function showRules(){
