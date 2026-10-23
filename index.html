@@ -125,6 +125,7 @@ body.v3d .side > #hud{position:static;transform:none;width:auto;box-shadow:0 4px
 .die3{width:3em;height:3em;position:relative;transform-style:preserve-3d;--h:1.5em}
 .v3d #diceLayer{transform-style:preserve-3d}
 .v3d #diceLayer .d3{perspective:none;transform-style:preserve-3d}
+.cupw2{position:absolute}.cup2{position:absolute;inset:0;transform-origin:50% 60%;filter:drop-shadow(0 6px 6px rgba(0,0,0,.45))}
 .cupw{position:absolute;perspective:520px;perspective-origin:50% 0%}
 .cupv{position:absolute;inset:0;transform-style:preserve-3d;transform-origin:50% 100%;transform:rotateX(-22deg)}   /* en 2D se ve un poco desde arriba */
 .cup3{position:absolute;left:0;top:0;transform-style:preserve-3d}
@@ -1656,38 +1657,57 @@ function animateDice(r){
   const spots=dies.map(posIn);   // donde se ubican al final (centro)
   const is3d=VIEW.mode==='3d', h=ds/2, clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), rnd=(a,b)=>a+Math.random()*(b-a);
   // el cubilete se pone a la izquierda del lugar de los dados, con lugar a la derecha para quedar acostado
-  const cx=clamp(spots[0].x-(cupW+cupH)-ds*.6, 2, W-(cupW+cupH)-ds*3), cy=clamp(spots[0].y-cupH*.55, 2, H-cupH-2);
-  layer.innerHTML=`<div class="cupw" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px"><div class="cupv">${cup3HTML(cupW,cupH)}</div></div>`+
-    r.map(()=>`<div class="d3" style="width:${ds}px;height:${ds}px">${cubeHTML()}</div>`).join('');
+  const dice3=r.map(()=>`<div class="d3" style="width:${ds}px;height:${ds}px">${cubeHTML()}</div>`).join('');
   layer.style.setProperty('--h', h+'px');
-  const cup=layer.querySelector('.cup3');
-  // 1) sacudir el cubilete (0 – 0,75 s), girando sobre su base
-  cup.style.transformOrigin=`${cupW/2}px ${cupH}px`;
-  cup.animate([
-    {transform:'translate(0,0) rotateZ(0deg) rotateY(0deg)'},{transform:'translate(-3px,-6px) rotateZ(-12deg) rotateY(40deg)'},{transform:'translate(4px,-3px) rotateZ(10deg) rotateY(90deg)'},
-    {transform:'translate(-4px,-7px) rotateZ(-13deg) rotateY(140deg)'},{transform:'translate(3px,-3px) rotateZ(11deg) rotateY(200deg)'},{transform:'translate(-2px,-6px) rotateZ(-8deg) rotateY(260deg)'},
-    {transform:'translate(0,0) rotateZ(0deg) rotateY(360deg)'}], {duration:750, easing:'ease-in-out'});
-  SFX.roll();
-  // 2) volcarlo como un vaso real: gira sobre el borde de abajo (lado derecho) y queda acostado sobre la mesa,
-  //    con la boca hacia adelante; un momento después se levanta y desaparece
-  setTimeout(()=>{
-    cup.style.transformOrigin=`${cupW}px ${cupH}px`;
-    cup.animate([{transform:'translateY(0) rotateZ(0deg)',opacity:1},{transform:'translateY(0) rotateZ(90deg)',opacity:1,offset:.22},
-      {transform:'translateY(0) rotateZ(84deg)',opacity:1,offset:.3},{transform:'translateY(0) rotateZ(90deg)',opacity:1,offset:.38},
-      {transform:'translateY(0) rotateZ(90deg)',opacity:1,offset:.7},{transform:`translateY(${-cupH*.8}px) rotateZ(60deg)`,opacity:0}],
-      {duration:1700, easing:'ease-out', fill:'forwards'});
-  }, 750);
-  // 3) boca del cubilete acostado: de ahí salen los dados
-  //    (al girar 90° sobre la esquina de abajo a la derecha, la boca queda en x = ancho+alto, a media altura del cilindro)
   let mouth, dir, perp;
-  if(is3d){   // en 3D el cubilete está parado sobre la mesa y gira con la cámara: "arriba" es altura real (z)
-    const s=-VIEW.spin*Math.PI/180, along=(cupW+cupH)-cupW/2;
-    dir={x:Math.cos(s), y:Math.sin(s)}; perp={x:-Math.sin(s), y:Math.cos(s)};
+  if(is3d){
+    // ===== VASO 3D: cilindro sólido sobre la mesa =====
+    // queda girado en diagonal respecto de la cámara (35°): así, desde cualquier ángulo, se ve redondo y, al volcarse,
+    // se ve de tres cuartos con la boca abierta (nunca de costado como una lámina plana)
+    const YAW=35, cx=clamp(spots[0].x-cupH-ds*.4, 2, W-cupH-ds*3), cy=clamp(spots[0].y-cupH*.3, 2, H-cupH-2);
+    layer.innerHTML=`<div class="cupw" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px;transform:rotateZ(calc(var(--spin) * -1 + ${YAW}deg)) rotateX(-90deg)">`+
+      `<div class="cupv">${cup3HTML(cupW,cupH)}</div></div>`+dice3;
+    const cup=layer.querySelector('.cup3');
+    // 1) sacudir (0 – 0,75 s): se balancea sobre su base y gira sobre sí mismo
+    cup.style.transformOrigin=`${cupW/2}px ${cupH}px`;
+    cup.animate([
+      {transform:'translate(0,0) rotateZ(0deg) rotateY(0deg)'},{transform:'translate(-3px,-6px) rotateZ(-12deg) rotateY(40deg)'},{transform:'translate(4px,-3px) rotateZ(10deg) rotateY(90deg)'},
+      {transform:'translate(-4px,-7px) rotateZ(-13deg) rotateY(140deg)'},{transform:'translate(3px,-3px) rotateZ(11deg) rotateY(200deg)'},{transform:'translate(-2px,-6px) rotateZ(-8deg) rotateY(260deg)'},
+      {transform:'translate(0,0) rotateZ(0deg) rotateY(360deg)'}], {duration:750, easing:'ease-in-out'});
+    // 2) volcarlo sobre el borde de abajo: queda acostado encima de la mesa. Para irse se levanta y se achica
+    //    (sin transparencia: la transparencia aplastaría el 3D)
+    setTimeout(()=>{
+      cup.style.transformOrigin=`${cupW}px ${cupH}px`;
+      cup.animate([{transform:'translateY(0) rotateZ(0deg) scale(1)'},{transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.22},
+        {transform:'translateY(0) rotateZ(84deg) scale(1)',offset:.3},{transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.38},
+        {transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.7},{transform:`translateY(${-cupH*1.4}px) rotateZ(70deg) scale(.01)`}],
+        {duration:1700, easing:'ease-in-out', fill:'forwards'});
+    }, 750);
+    // 3) boca del vaso acostado (girado 90° sobre la esquina de abajo, la boca queda a "ancho+alto" del borde, a media altura)
+    const a=(-VIEW.spin+YAW)*Math.PI/180, along=(cupW+cupH)-cupW/2;
+    dir={x:Math.cos(a), y:Math.sin(a)}; perp={x:-Math.sin(a), y:Math.cos(a)};
     mouth={x:cx+cupW/2+along*dir.x-h, y:cy+cupH+along*dir.y-h, z:cupW/2};
   } else {
+    // ===== VASO 2D: cubilete dibujado, se sacude y se vuelca de costado =====
+    const cx=clamp(spots[0].x-cupW*2, 2, W-cupW*3), cy=clamp(spots[0].y-cupH*.45, 2, H-cupH-2);
+    layer.innerHTML=`<div class="cupw2" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px"><div class="cup2">${CUP_SVG}</div></div>`+dice3;
+    const cup=layer.querySelector('.cup2');
+    cup.animate([
+      {transform:'translate(0,0) rotate(0deg)'},{transform:'translate(-4px,-6px) rotate(-14deg)'},{transform:'translate(5px,-2px) rotate(12deg)'},
+      {transform:'translate(-5px,-7px) rotate(-16deg)'},{transform:'translate(4px,-3px) rotate(13deg)'},{transform:'translate(-3px,-6px) rotate(-10deg)'},
+      {transform:'translate(0,-8px) rotate(0deg)'}], {duration:750, easing:'ease-in-out'});
+    const TH=100, tx=cupW*.12, ty=cupH*.12, th=TH*Math.PI/180;
+    setTimeout(()=>{
+      cup.animate([{transform:'translate(0,-8px) rotate(0deg)',opacity:1},{transform:`translate(${tx}px,${ty}px) rotate(${TH}deg)`,opacity:1,offset:.3},
+        {transform:`translate(${tx}px,${ty}px) rotate(${TH}deg)`,opacity:1,offset:.62},{transform:`translate(${tx-cupW*.2}px,${ty-cupH*.7}px) rotate(${TH-35}deg)`,opacity:0}],
+        {duration:1500, easing:'ease-out', fill:'forwards'});
+    }, 750);
+    // boca del dibujo ya volcado (gira sobre el 50% / 60%; la boca está arriba, en el 14% del alto)
+    const ox=cupW/2, oy=cupH*.6, vy=cupH*.14-oy;
     dir={x:1, y:.12}; perp={x:0, y:1};
-    mouth={x:cx+cupW+cupH-h, y:cy+cupH-cupW/2-h, z:h*.35};   // en 2D la "altura" se dibuja corrida: así arrancan justo en la boca
+    mouth={x:cx+ox+tx-vy*Math.sin(th)-h, y:cy+oy+ty+vy*Math.cos(th)-h, z:h*.35};
   }
+  SFX.roll();
   // dónde caen: ruedan desde la boca hacia adelante, cada uno un poco distinto
   const fall=r.map((_,k)=>{ const d=ds*(1.6+k*1.25+rnd(0,.5)), p=ds*rnd(-.5,.7);
     return {x:clamp(mouth.x+dir.x*d+perp.x*p, 0, W-ds), y:clamp(mouth.y+dir.y*d+perp.y*p, 0, H-ds)}; });
