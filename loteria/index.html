@@ -200,6 +200,23 @@ const DICHOS = {
   86:'Kokue, la chacra', 87:'Ñu, el campo', 88:'Las dos gorditas', 89:'El que cierra la puerta', 90:'Taita guasu, el abuelo'
 };
 const dicho = n => DICHOS[n] || '';
+// Cómo tiene que leer el cantor las palabras en guaraní. La voz del celular habla castellano,
+// así que se escribe "a la castellana": j → y, h → j, la ' (puso) se junta, y el acento va donde lo pone el guaraní
+// (casi siempre en la última sílaba). La "y" guaraní (la sexta vocal) no existe en castellano: se acerca con "i".
+const HABLA = {
+  1:'Arí piajú, año nuevo', 3:'Mbojapí, los tres reyes', 9:'El cambuchí', 10:'Mocói po, las dos manos',
+  11:'Cambá canilla', 15:'La niña bonita, mitancuñá porán', 16:'El mbeyú de la abuela', 19:'El vorí vorí',
+  20:'Mitán rusú, los veinte años', 26:'El so-ó yosopí', 28:'El quivevé', 29:'El chipá guasú',
+  30:'Fin de mes, ndaipóri pirapiré', 31:'El Yasí Yateré', 33:'Ñandeyára arí', 34:'El pastel mandió',
+  37:'El Curupí', 39:'El mbocayá', 41:'El carái guasú', 42:'El tatacuá', 43:'La mandió chirirí',
+  45:'El sombrero pirí', 47:'El Mbói Tu-í', 48:'El Moñái', 49:'El Teyú Yaguá', 51:'El Aó Aó',
+  52:'La Caá Yarií', 55:'Los dos cincos, po já po', 57:'Mbaracayá, el gato', 58:'Riguasú, la gallina',
+  59:'Yagua-í, el perrito', 60:'El carumbé', 62:'El tren de Sapucái', 64:'El lago Ipacaraí',
+  67:'El mburucuyá', 68:'La naranja jái', 69:'Tereré yeré, la ronda del tereré', 70:'Carái tuyá, setenta pirulos',
+  76:'Curusú, la cruz', 79:'El tatú carreta', 80:'Yarií, la abuela', 82:'El caá jeén', 85:'Caaguí, el monte',
+  86:'Cocué, la chacra', 90:'Táita guasú, el abuelo'
+};
+const habla = n => HABLA[n] || dicho(n);
 const UNID = ['','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez','once','doce','trece','catorce','quince','dieciséis','diecisiete','dieciocho','diecinueve','veinte','veintiuno','veintidós','veintitrés','veinticuatro','veinticinco','veintiséis','veintisiete','veintiocho','veintinueve'];
 const DEC = {3:'treinta',4:'cuarenta',5:'cincuenta',6:'sesenta',7:'setenta',8:'ochenta',9:'noventa'};
 const enLetras = n => n<30 ? UNID[n] : DEC[Math.floor(n/10)] + (n%10 ? ' y '+UNID[n%10] : '');
@@ -250,7 +267,7 @@ function say(txt, forzar){
     u.rate=c.rate; u.pitch=c.pitch; const v=vozPara(c.sexo); if(v){ u.voice=v; u.lang=v.lang; } speechSynthesis.speak(u); }catch(e){}
 }
 // como el cantor de la lotería de casa: primero el dicho y después el número
-function cantarBolilla(n){ say(`${dicho(n)}... ¡El ${n}!`); }
+function cantarBolilla(n){ say(`${habla(n)}... ¡El ${n}!`); }
 
 /* ====================== CARTONES ====================== */
 // Cartón de 90 bolillas como en la lotería real: 3 filas x 9 columnas, 5 números por fila (15 en total).
@@ -1015,7 +1032,7 @@ document.addEventListener('click', e=>{
     case 'ovRes': UI.closedResult=S.result&&S.result.at; renderOv(); break;
     case 'sonido': UI.sonido=true; renderOv(); break;
     case 'sonidoClose': UI.sonido=false; renderOv(); break;
-    case 'cantorSel': PREF.cantor=el.dataset.id; PREF.voz=true; savePref(); say(`${dicho(33)}... ¡El 33!`, true); renderOv(); $('#top').innerHTML=S?topHTML():''; break;
+    case 'cantorSel': PREF.cantor=el.dataset.id; PREF.voz=true; savePref(); say(`${habla(33)}... ¡El 33!`, true); renderOv(); $('#top').innerHTML=S?topHTML():''; break;
     case 'sinVoz': PREF.voz=false; savePref(); if(window.speechSynthesis) speechSynthesis.cancel(); renderOv(); if(S) $('#top').innerHTML=topHTML(); break;
     case 'efectos': PREF.sound=!PREF.sound; savePref(); beep(880,.1); renderOv(); if(S) $('#top').innerHTML=topHTML(); break;
     case 'chat': $('#chat').classList.toggle('on'); renderChat(); $('#top').innerHTML=topHTML(); if($('#chat').classList.contains('on')) $('#chatIn').focus(); break;
