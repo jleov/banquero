@@ -129,6 +129,9 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .bill .bv{margin-left:12px}
 .bill .bn{position:absolute;right:-8px;top:-9px;background:#222;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;text-shadow:none;border:2px solid #fff}
 .bill.pop{animation:billpop .6s}
+.jcard{height:38px;padding:0 8px;border-radius:5px;color:#fff;font-weight:900;font-size:12px;display:flex;flex-direction:column;justify-content:center;line-height:1.1;border:2px dashed #fff;outline:1px solid #333}
+.jcard small{font-weight:600;font-size:10px}
+.jcard.cc{background:linear-gradient(160deg,#f28c28,#c4570c)}.jcard.ca{background:linear-gradient(160deg,#1d5fd1,#0b2f7a)}
 @keyframes billpop{40%{transform:scale(1.25) rotate(-4deg)}}
 .pl{position:relative}
 .delta{position:absolute;right:10px;top:-4px;font-weight:900;font-size:15px;pointer-events:none;animation:floatup 2.2s forwards;text-shadow:0 1px 0 #fff}
@@ -249,6 +252,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
           <button class="btn sm" onclick="showMyProps()">🏠 Propiedades</button>
           <button class="btn sm gold" onclick="showTrade()">🤝 Negociar</button>
           <button class="btn sm gray" onclick="showRules()">📜 Reglas</button>
+          <button class="btn sm gray" id="btnSfx" style="flex:0 0 auto" onclick="toggleSfx()" title="Sonidos del juego">🎵</button>
         </div>
         <div class="trades" id="trades"></div>
         <div class="wallet" id="wallet"></div>
@@ -415,7 +419,8 @@ function walletHTML(p){
   const bl=billsOf(p.money);
   const items=BILLS.filter(b=>bl[b.v]>0).map(b=>`<div class="bill ${bl[b.v]>1?'stack':''}" style="--bc:${b.c}" data-v="${b.v}" title="${bl[b.v]} billete(s) de ${fmt(b.v)}">
     <span class="bseal">₲</span><span class="bv">${billLabel(b.v)}</span><span class="bn">×${bl[b.v]}</span></div>`).join('');
-  return `<div class="bills">${items||'<span class="muted">Sin billetes</span>'}</div>`;
+  const cards=(p.jcards||[]).map(d=>`<div class="jcard ${d}" title="Usala cuando estés preso o vendela con 🤝 Negociar">🎫 Salga libre<small>de Tacumbú</small></div>`).join('');
+  return `<div class="bills">${items||'<span class="muted">Sin billetes</span>'}${cards}</div>`;
 }
 // en modo local "yo" es el jugador del turno; si le toca a un bot, el primer humano
 const meId = () => {
@@ -603,7 +608,8 @@ function validTrade(t, proposing){
   if(!proposing && t.rm>Math.max(0,b.money)) return 'No te alcanza el dinero para aceptar.';   // al proponer no se revela la plata del otro
   for(const i of t.gp) if(!S.props[i] || S.props[i].o!==a.id || !tradable(i)) return 'Una propiedad ya no está disponible.';
   for(const i of t.rp) if(!S.props[i] || S.props[i].o!==b.id || !tradable(i)) return 'Una propiedad ya no está disponible.';
-  if(!t.gp.length && !t.rp.length && !t.gm && !t.rm) return 'La oferta está vacía.';
+  if(t.gc>a.jcards.length || t.rc>b.jcards.length) return 'La tarjeta “Salga libre” ya no está disponible.';
+  if(!t.gp.length && !t.rp.length && !t.gm && !t.rm && !t.gc && !t.rc) return 'La oferta está vacía.';
   return null;
 }
 
@@ -659,7 +665,7 @@ function act(pid, a){
     case 'bankrupt': goBankrupt(p); break;
     case 'trade': {
       const t={id:++S.tradeSeq, from:pid, to:a.to, gm:Math.round(+a.gm||0), rm:Math.round(+a.rm||0),
-               gp:(a.gp||[]).map(Number), rp:(a.rp||[]).map(Number)};
+               gp:(a.gp||[]).map(Number), rp:(a.rp||[]).map(Number), gc:Math.max(0,a.gc|0), rc:Math.max(0,a.rc|0)};
       const err=validTrade(t, true); if(err) return err;
       if(S.trades.filter(x=>x.from===pid).length>=3) return 'Tenés demasiadas ofertas pendientes.';
       S.trades.push(t); log(`🤝 ${p.name} le hace una oferta a ${P(t.to).name}.`); break;
@@ -670,6 +676,7 @@ function act(pid, a){
       const A=P(t.from), Bp=P(t.to);
       A.money+=t.rm-t.gm; Bp.money+=t.gm-t.rm;
       t.gp.forEach(j=>S.props[j].o=Bp.id); t.rp.forEach(j=>S.props[j].o=A.id);
+      Bp.jcards.push(...A.jcards.splice(0,t.gc||0)); A.jcards.push(...Bp.jcards.splice(0,t.rc||0));
       S.trades=S.trades.filter(x=>x!==t);
       log(`✅ ${Bp.name} acepta el negocio con ${A.name}.`); break;
     }
@@ -686,8 +693,9 @@ function act(pid, a){
 const BOT_RESERVE = 150*K;   // plata que el bot trata de guardar para alquileres
 function botTradeValue(bot, t){
   // cuánto gana el bot con la oferta (positivo = le conviene)
-  const gives = t.to===bot.id ? {m:t.rm, ps:t.rp} : {m:t.gm, ps:t.gp};
-  const gets  = t.to===bot.id ? {m:t.gm, ps:t.gp} : {m:t.rm, ps:t.rp};
+  // la tarjeta "Salga libre" vale como una fianza
+  const gives = t.to===bot.id ? {m:t.rm+(t.rc||0)*JAIL_FINE, ps:t.rp} : {m:t.gm+(t.gc||0)*JAIL_FINE, ps:t.gp};
+  const gets  = t.to===bot.id ? {m:t.gm+(t.gc||0)*JAIL_FINE, ps:t.gp} : {m:t.rm+(t.rc||0)*JAIL_FINE, ps:t.rp};
   const other = t.to===bot.id ? t.from : t.to;
   const worth = (i, owner) => {
     const sp=B[i]; let v=sp.p*K;
@@ -997,6 +1005,7 @@ function buildBoard(){
 // --- animaciones de fichas y dados ---
 const disp={}; let shownRoll=-1, shownCard=-1, rollingUntil=0, lastTurnPid=null;
 let diceEndAt=0, uiHoldUntil=0, holdTimer=null;
+const prevJail={}; let prevOwned=null, prevHouses=null;
 const ROLL_MS=1900, STEP_MS=150;
 setInterval(()=>{
   if(!S || S.phase==='lobby') return;
@@ -1006,19 +1015,77 @@ setInterval(()=>{
     if(disp[p.id]==null){ disp[p.id]=p.pos; changed=true; continue; }
     if(disp[p.id]!==p.pos){
       const d=(p.pos-disp[p.id]+40)%40;
-      disp[p.id] = (d<=12 && !p.jail) ? (disp[p.id]+1)%40 : p.pos;
-      changed=true; if(d<=12) beep(660,.03);
+      const walk = d<=12 && !p.jail;
+      disp[p.id] = walk ? (disp[p.id]+1)%40 : p.pos;
+      changed=true;
+      if(walk) SFX.step(disp[p.id]===p.pos); else SFX.whoosh();
     }
   }
   if(changed) renderTokens();
 }, STEP_MS);
 
-let actx=null;
-function beep(f,dur,vol){
-  try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)();
-    const o=actx.createOscillator(), g=actx.createGain(); o.frequency.value=f; g.gain.value=vol||.04;
-    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+dur); }catch(e){}
+/* ====================== SONIDOS ====================== */
+let actx=null, noiseBuf=null;
+function ac(){
+  if(!actx){ actx=new (window.AudioContext||window.webkitAudioContext)();
+    noiseBuf=actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+    const d=noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; }
+  return actx;
 }
+// los navegadores de celular solo dejan sonar después de tocar la pantalla
+['pointerdown','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{ try{ ac().resume(); SFX.load(); }catch(e){} }, {passive:true}));
+function tone(o){   // {f, f2, type, t, dur, vol}
+  if(!SFX.on) return;
+  try{ const c=ac(), t0=c.currentTime+(o.t||0), osc=c.createOscillator(), g=c.createGain();
+    osc.type=o.type||'sine'; osc.frequency.setValueAtTime(o.f,t0); if(o.f2) osc.frequency.exponentialRampToValueAtTime(o.f2,t0+o.dur);
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(o.vol||.1,t0+.004); g.gain.exponentialRampToValueAtTime(0.0001,t0+o.dur);
+    osc.connect(g); g.connect(c.destination); osc.start(t0); osc.stop(t0+o.dur+.02); }catch(e){}
+}
+function noise(o){   // {t, dur, vol, freq, freq2, q, filter}
+  if(!SFX.on) return;
+  try{ const c=ac(), t0=c.currentTime+(o.t||0), src=c.createBufferSource(), f=c.createBiquadFilter(), g=c.createGain();
+    src.buffer=noiseBuf; src.loop=true; f.type=o.filter||'bandpass'; f.frequency.setValueAtTime(o.freq||2000,t0);
+    if(o.freq2) f.frequency.exponentialRampToValueAtTime(o.freq2,t0+o.dur); f.Q.value=o.q||1;
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(o.vol||.1,t0+(o.attack||.003)); g.gain.exponentialRampToValueAtTime(0.0001,t0+o.dur);
+    src.connect(f); f.connect(g); g.connect(c.destination); src.start(t0, Math.random()*.5); src.stop(t0+o.dur+.02); }catch(e){}
+}
+const SFX = {
+  on: load('bnq_sfx')!==false, dice:null, loading:false,
+  load(){ if(this.dice||this.loading) return; this.loading=true;
+    fetch('dados.mp3').then(r=>r.arrayBuffer()).then(b=>ac().decodeAudioData(b)).then(buf=>{ this.dice=buf; }).catch(()=>{ this.loading=false; }); },
+  roll(){   // dados.mp3: cubilete + caída en la mesa (sincronizado con la animación)
+    if(!this.on) return;
+    if(this.dice){ try{ const c=ac(), s=c.createBufferSource(), g=c.createGain(); s.buffer=this.dice; g.gain.value=.4; s.connect(g); g.connect(c.destination); s.start(); return; }catch(e){} }
+    for(let t=0;t<.72;t+=.09) noise({t, dur:.03, vol:.25, freq:2500, q:3});
+    [1.6,1.67,1.79].forEach((t,k)=>{ tone({t, f:170, f2:90, dur:.08, vol:.35/(k+1)}); noise({t, dur:.02, vol:.3/(k+1), freq:3200, q:2}); });
+  },
+  step(last){   // ficha de madera golpeando el tablero
+    const v=last?1.4:1, p=.9+Math.random()*.2;
+    noise({dur:.04, vol:.22*v, freq:1600*p, q:5}); tone({f:300*p, f2:180*p, dur:.06, vol:.13*v});
+    if(last){ noise({t:.07, dur:.05, vol:.3, freq:1300, q:5}); tone({t:.07, f:240, f2:140, dur:.09, vol:.18}); }
+  },
+  whoosh(){ noise({dur:.35, vol:.12, freq:600, freq2:3000, q:1.2, attack:.12}); },
+  coins(){   // cobrar: monedas
+    for(let k=0;k<5;k++){ const f=2600+Math.random()*1500, t=k*.055+Math.random()*.02;
+      tone({t, f, type:'triangle', dur:.28, vol:.08}); tone({t, f:f*2.76, dur:.12, vol:.03}); }
+  },
+  pay(){   // pagar: billetes que se cuentan
+    for(let k=0;k<3;k++) noise({t:k*.09, dur:.08, vol:.14, freq:3500, freq2:1800, q:1.5, attack:.02});
+  },
+  buy(){ this.coins(); tone({t:.18, f:1568, type:'triangle', dur:.5, vol:.06}); tone({t:.18, f:2093, dur:.6, vol:.03}); },
+  card(){ noise({dur:.12, vol:.18, freq:2200, freq2:5000, q:.8, attack:.04}); noise({t:.13, dur:.08, vol:.12, freq:4000, q:1}); },
+  turn(){ [[784,0],[1047,.13],[1319,.26]].forEach(([f,t])=>{ tone({t, f, dur:.45, vol:.07}); tone({t, f:f*4, dur:.06, vol:.02}); }); },
+  jail(){   // reja de metal que se cierra
+    noise({dur:.06, vol:.3, freq:900, q:1});
+    [187,463,891,1307,1903].forEach((f,k)=>tone({f, dur:1.1-k*.15, vol:.08/(1+k*.4), type:k?'sine':'triangle'}));
+    tone({t:.18, f:210, dur:.5, vol:.05});
+  },
+  build(){ [0,.11].forEach(t=>{ noise({t, dur:.05, vol:.25, freq:1200, q:4}); tone({t, f:420, f2:220, dur:.07, vol:.12}); }); }
+};
+function beep(f,dur,vol){ tone({f, dur, vol:vol||.04}); }
+function toggleSfx(){ SFX.on=!SFX.on; store('bnq_sfx',SFX.on); renderSfxBtn(); if(SFX.on) SFX.coins(); }
+function renderSfxBtn(){ const b=$('#btnSfx'); b.textContent=SFX.on?'🎵':'🔇'; b.title=SFX.on?'Apagar sonidos del juego':'Prender sonidos del juego'; }
+renderSfxBtn();
 
 function renderTokens(){
   document.querySelectorAll('.toks').forEach(t=>t.innerHTML='');
@@ -1062,7 +1129,7 @@ function animateDice(r){
     {transform:'translate(0,0) rotate(0deg)'},{transform:'translate(-4px,-6px) rotate(-14deg)'},{transform:'translate(5px,-2px) rotate(12deg)'},
     {transform:'translate(-5px,-7px) rotate(-16deg)'},{transform:'translate(4px,-3px) rotate(13deg)'},{transform:'translate(-3px,-6px) rotate(-10deg)'},
     {transform:'translate(0,-8px) rotate(0deg)'}], {duration:750, easing:'ease-in-out'});
-  for(let t=0;t<720;t+=85) setTimeout(()=>beep(1700+Math.random()*1200,.018,.05), t);
+  SFX.roll();
   // 2) volcarlo hacia la mesa
   setTimeout(()=>{
     cup.animate([{transform:'translate(0,-8px) rotate(0deg)',opacity:1},{transform:`translate(${cupW*.35}px,${cupH*.15}px) rotate(112deg)`,opacity:1,offset:.45},
@@ -1088,8 +1155,6 @@ function animateDice(r){
       {transform:`rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(0deg)`}],
       {duration:1000, delay:900+k*70, easing:'ease-out', fill:'both'});
   });
-  setTimeout(()=>{ beep(140,.07,.14); setTimeout(()=>beep(170,.05,.1),110); }, 900+700);
-  setTimeout(()=>{ beep(150,.05,.08); }, 900+1000);
   setTimeout(()=>{ if(Date.now()>=diceEndAt){ layer.innerHTML=''; renderCenter(); } }, ROLL_MS+80);
 }
 
@@ -1123,7 +1188,15 @@ function renderGame(){
   if(S.card && S.card.id!==shownCard){ if(shownCard!==-1) showCard(S.card); shownCard=S.card.id; }
   if(shownCard===-1) shownCard=S.card?S.card.id:0;
   // aviso de turno
-  if(S.phase==='play' && cur().id!==lastTurnPid){ lastTurnPid=cur().id; if(canAct(cur().id) && NET.mode!=='local'){ beep(880,.12,.06); setTimeout(()=>beep(1175,.15,.06),140); } }
+  if(S.phase==='play' && cur().id!==lastTurnPid){ lastTurnPid=cur().id; if(canAct(cur().id)) SFX.turn(); }
+  // sonidos de lo que pasó en el tablero
+  for(const p of S.players){
+    const pj=prevJail[p.id]; prevJail[p.id]=p.jail;
+    if(pj===false && p.jail) SFX.jail();
+  }
+  const owned=Object.keys(S.props).length, houses=Object.values(S.props).reduce((a,o)=>a+o.h,0);
+  if(prevOwned!=null && owned>prevOwned) SFX.buy(); else if(prevHouses!=null && houses>prevHouses) SFX.build();
+  prevOwned=owned; prevHouses=houses;
   renderCenter(); renderPlayers(); renderTrades();
   const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true);
 }
@@ -1215,14 +1288,14 @@ function renderPlayers(){
     const d=p.money-before, el=document.createElement('span');
     el.className='delta '+(d>0?'up':'down'); el.textContent=(d>0?'+':'−')+fmt(Math.abs(d)).replace('₲ ','₲');
     row.appendChild(el);
-    if(canAct(p.id) && NET.mode!=='local') beep(d>0?1320:330,.08,.05);
+    if(p.id===meId()) d>0 ? SFX.coins() : SFX.pay();
   }
   renderWallet();
 }
 function tradeDesc(t){
   const A=P(t.from), Bp=P(t.to);
-  const list=(m,ps)=>[m?fmt(m):'', ...ps.map(i=>B[i].n)].filter(Boolean).join(', ')||'nada';
-  return `<b>${esc(A.name)}</b> da: ${esc(list(t.gm,t.gp))}<br><b>${esc(Bp.name)}</b> da: ${esc(list(t.rm,t.rp))}`;
+  const list=(m,ps,c)=>[m?fmt(m):'', ...ps.map(i=>B[i].n), c?`🎫 ${c} tarjeta${c>1?'s':''} “Salga libre”`:''].filter(Boolean).join(', ')||'nada';
+  return `<b>${esc(A.name)}</b> da: ${esc(list(t.gm,t.gp,t.gc))}<br><b>${esc(Bp.name)}</b> da: ${esc(list(t.rm,t.rp,t.rc))}`;
 }
 function renderTrades(){
   const mine=S.trades.filter(t=>NET.mode==='local' || t.to===NET.myPid || t.from===NET.myPid);
@@ -1334,7 +1407,8 @@ function showTrade(target){
   if(!others.length) return;
   target = target || others[0].id;
   const T=P(target);
-  const chk=(pid,cls)=>ownedList(pid).filter(tradable).map(i=>`<label class="chk"><input type="checkbox" class="${cls}" value="${i}"><span class="dot" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span>${B[i].s||B[i].n}${S.props[i].m?' (hip.)':''}</label>`).join('')||'<p class="muted">Nada para ofrecer</p>';
+  const chk=(pid,cls)=>(P(pid).jcards.map(()=>`<label class="chk"><input type="checkbox" class="${cls}C">🎫 Salga libre de Tacumbú</label>`).join('') +
+    ownedList(pid).filter(tradable).map(i=>`<label class="chk"><input type="checkbox" class="${cls}" value="${i}"><span class="dot" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span>${B[i].s||B[i].n}${S.props[i].m?' (hip.)':''}</label>`).join(''))||'<p class="muted">Nada para ofrecer</p>';
   const h=`<h3>🤝 Negociar</h3>
     <label style="font-size:13px;font-weight:700">Con:</label>
     <select id="trTo" onchange="showTrade(this.value)">${others.map(p=>`<option value="${p.id}" ${p.id===target?'selected':''}>${p.emoji} ${esc(p.name)}</option>`).join('')}</select>
@@ -1348,7 +1422,8 @@ function showTrade(target){
 }
 function sendTrade(){
   const vals=c=>[...document.querySelectorAll('.'+c+':checked')].map(x=>+x.value);
-  doAct({type:'trade', to:$('#trTo').value, gm:+$('#trGm').value||0, rm:+$('#trRm').value||0, gp:vals('trGp'), rp:vals('trRp')});
+  const cards=c=>document.querySelectorAll('.'+c+':checked').length;
+  doAct({type:'trade', to:$('#trTo').value, gm:+$('#trGm').value||0, rm:+$('#trRm').value||0, gp:vals('trGp'), rp:vals('trRp'), gc:cards('trGpC'), rc:cards('trRpC')});
   closeModal();
 }
 function confirmBankrupt(){
@@ -1357,7 +1432,7 @@ function confirmBankrupt(){
 function showCard(c){
   const r=$('#cardRoot');
   r.innerHTML=`<div class="cardov" onclick="this.remove()"><div class="bigcard ${c.deck}"><div class="ci">${c.deck==='cc'?'💳':'🏦'}</div><h2>${DECK_NAME[c.deck].toUpperCase()}</h2><div>${esc(c.who)} sacó:</div><p>${esc(c.x)}</p><small>Tocá para cerrar</small></div></div>`;
-  beep(523,.1,.05); setTimeout(()=>beep(784,.15,.05),110);
+  SFX.card();
   clearTimeout(showCard.t); showCard.t=setTimeout(()=>{ r.innerHTML=''; },5000);
 }
 function showRules(){
