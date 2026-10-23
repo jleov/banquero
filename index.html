@@ -1266,7 +1266,7 @@ function newPeer(id){
 /* ====================== DUEÑO DEL JUEGO ====================== */
 // Cada sala le avisa al panel del dueño (si está abierto) cómo va la partida. Para que nadie se haga pasar
 // por el dueño, el panel firma con una llave que sale de su contraseña y las salas lo comprueban con esta llave pública.
-const OWNER_PUB = null;   // {x:'…', y:'…'}
+const OWNER_PUB = {x:'eLdK1LWh1LGyAlt0IW6Apa9bnuRt1LwLi3D1MQtqtHk', y:'XPx_IfKocm2ZANCG_As4PxsgjToAMnZMEaWlzZWWBKk'};
 const OWNER_ID = PREFIX+'dueno';
 const EC={name:'ECDSA', namedCurve:'P-256'}, SIG={name:'ECDSA', hash:'SHA-256'};
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
