@@ -105,10 +105,28 @@ body.v3d{background:radial-gradient(ellipse at 50% 35%,#1a7a5c,#0b3d2e 60%,#0626
 .v3d .board.dragging{transition:none}
 .v3d .cell,.v3d .toks,.v3d .band{transform-style:preserve-3d}
 .v3d .cell{overflow:visible}
-.v3d .tk{transform-origin:50% 100%;transform:rotateZ(calc(var(--spin) * -1)) rotateX(calc(var(--tilt) * -1)) translateY(-.4em);
-  width:4em;height:4em;margin:-.7em;border-width:.4em;box-shadow:0 .6em .5em -.25em rgba(0,0,0,.65),inset 0 -.4em .6em rgba(0,0,0,.15)}
-.v3d .tk span{font-size:2.4em}
-.v3d .hs,.v3d .hh{transform-origin:50% 100%;transform:rotateZ(calc(var(--spin) * -1)) rotateX(calc(var(--tilt) * -1)) scale(1.35)}
+/* ficha 3D: base redonda con grosor (color del jugador) + la figura elegida parada, con volumen */
+.v3d .tk{background:none;border:0;box-shadow:none;width:3.6em;height:3.6em;margin:-.55em;position:relative;
+  transform-style:preserve-3d;transform:rotateZ(calc(var(--spin) * -1))}
+.tk3::before{content:"";position:absolute;left:0;top:8%;width:100%;height:100%;border-radius:50%;background:radial-gradient(rgba(0,0,0,.55),transparent 70%);filter:blur(2px)}
+.pbase{position:absolute;left:12%;top:12%;width:76%;height:76%;transform-style:preserve-3d}
+.pbase i{position:absolute;inset:0;border-radius:50%;background:var(--pc);filter:brightness(.55)}
+.pbase i:last-child{filter:none;background:radial-gradient(circle at 35% 30%,#fff8,transparent 55%),var(--pc);box-shadow:inset 0 0 0 .18em rgba(255,255,255,.7)}
+.pfig{position:absolute;left:-30%;right:-30%;bottom:50%;height:150%;transform-origin:50% 100%;transform:translateZ(.6em) rotateX(-90deg);transform-style:preserve-3d;pointer-events:none}
+.pfig b{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;font-size:3.5em;line-height:.95;filter:brightness(.35) saturate(.6)}
+.pfig b:last-child{filter:drop-shadow(0 0 .04em #fff) saturate(1.15)}
+.v3d .tk.jailed .pfig{filter:grayscale(.7)}
+.v3d .hs,.v3d .hh{transform-origin:50% 100%;transform:rotateZ(calc(var(--spin) * -1)) rotateX(-90deg) scale(1.45)}
+/* dados 3D sobre la mesa */
+.v3d #center{overflow:visible;transform-style:preserve-3d}
+.v3d #center .dice{transform-style:preserve-3d;gap:1.1em;margin-top:2.4em}
+@media (min-width:901px){ .v3d .board{--ty:-2%} }
+body.v3d .side > #hud{position:static;transform:none;width:auto;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.die3{width:3em;height:3em;position:relative;transform-style:preserve-3d;--h:1.5em}
+.v3d #diceLayer{transform-style:preserve-3d}
+.v3d #diceLayer .d3{perspective:none;transform-style:preserve-3d}
+.cupw{position:absolute}.cupw .cup{position:absolute;inset:0}
+.v3d .cupw{transform-style:preserve-3d;transform-origin:50% 100%;transform:rotateZ(calc(var(--spin) * -1)) rotateX(-90deg)}
 .v3d .clogo{font-size:2.6em}
 .v3d #hud{display:flex;flex-direction:column;align-items:center;gap:.5em;text-align:center;position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
   width:min(94%,560px);background:rgba(246,241,225,.96);border-radius:14px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:20;font-size:14px}
@@ -1535,7 +1553,12 @@ function renderTokens(){
     const pos = disp[p.id]!=null ? disp[p.id] : p.pos;
     const el=document.createElement('div');
     el.className='tk'+(p.jail && pos===10?' jailed':'')+(S.phase==='play'&&cur().id===p.id?' now':'');
-    el.style.borderColor=p.color; el.innerHTML=`<span>${p.emoji}</span>`; el.title=p.name;
+    el.style.borderColor=p.color; el.title=p.name;
+    if(VIEW.mode==='3d'){   // pieza 3D: 6 capas de base + 9 capas de la figura para darle grosor
+      el.classList.add('tk3'); el.style.setProperty('--pc', p.color);
+      el.innerHTML=`<div class="pbase">${range(6).map(i=>`<i style="transform:translateZ(${(i*.11).toFixed(2)}em)"></i>`).join('')}</div>`+
+        `<div class="pfig">${range(9).map(j=>`<b style="transform:translateZ(${((j-8)*.06).toFixed(2)}em)">${p.emoji}</b>`).join('')}</div>`;
+    } else el.innerHTML=`<span>${p.emoji}</span>`;
     $('#c'+pos+' .toks').appendChild(el);
   }
   camFollow();
@@ -1580,6 +1603,8 @@ const CUP_SVG=`<svg viewBox="0 0 60 72" width="100%" height="100%"><defs>
   <ellipse cx="30" cy="8" rx="24" ry="6" fill="url(#cupm)" stroke="#c99a06" stroke-width="2"/></svg>`;
 const FACE_ROT={1:[0,0],2:[-90,0],3:[0,-90],4:[0,90],5:[90,0],6:[0,180]};
 const cubeHTML=()=>`<div class="cube">${[1,2,3,4,5,6].map(n=>`<div class="face f${n}">${pipsHTML(n)}</div>`).join('')}</div>`;
+// dado 3D quieto sobre la mesa, mostrando arriba el número que salió (un poco girado para que se vea natural)
+const die3HTML=(n,k)=>{ const [rx,ry]=FACE_ROT[n]; return `<div class="die3" style="transform:translateZ(1.5em) rotateZ(${k?9:-7}deg)"><div class="cube" style="transform:rotateX(${rx}deg) rotateY(${ry}deg)">${[1,2,3,4,5,6].map(m=>`<div class="face f${m}">${pipsHTML(m)}</div>`).join('')}</div></div>`; };
 function animateDice(r){
   const layer=$('#diceLayer'), spot=$('#diceSpot');
   if(!layer || !spot){ return; }
@@ -1589,7 +1614,7 @@ function animateDice(r){
   const ds=dies[0].offsetWidth, cupW=ds*1.55, cupH=ds*1.85;
   const land=dies.map(d=>({x:d.offsetLeft-ctr.scrollLeft, y:d.offsetTop-ctr.scrollTop}));
   const cx=Math.max(4, land[0].x-cupW*1.9), cy=Math.max(4, land[0].y-cupH*1.15);
-  layer.innerHTML=`<div class="cup" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px">${CUP_SVG}</div>`+
+  layer.innerHTML=`<div class="cupw" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px"><div class="cup">${CUP_SVG}</div></div>`+
     r.map((n,k)=>`<div class="d3" style="width:${ds}px;height:${ds}px">${cubeHTML()}</div>`).join('');
   layer.style.setProperty('--h', (ds/2)+'px');
   const cup=layer.querySelector('.cup');
@@ -1611,12 +1636,20 @@ function animateDice(r){
     const end=land[k], [rx,ry]=FACE_ROT[r[k]];
     const sx=mouth.x+k*ds*.2, sy=mouth.y-k*ds*.15;
     const mx=(sx+end.x)/2+ds*(k?.6:-.2), my=Math.min(sy,end.y)-ds*(1.1+k*.4);
-    const T=(x,y,s)=>`translate(${x}px,${y}px) scale(${s})`;
-    el.animate([
-      {transform:T(sx,sy,.45),opacity:0,offset:0},{transform:T(sx+ds*.2,sy-ds*.2,.7),opacity:1,offset:.08},
-      {transform:T(mx,my,1.12),opacity:1,offset:.42},{transform:T(end.x,end.y,1),opacity:1,offset:.7},
-      {transform:T(end.x+ds*.06,end.y-ds*.35,1),opacity:1,offset:.83},{transform:T(end.x,end.y,1),opacity:1,offset:1}],
-      {duration:1000, delay:900+k*70, easing:'cubic-bezier(.3,.7,.4,1)', fill:'both'});
+    let frames;
+    if(VIEW.mode==='3d'){
+      // en 3D los dados vuelan hacia arriba (eje Z), caen sobre la mesa, rebotan y quedan apoyados (z = medio dado)
+      const T=(x,y,z)=>`translate3d(${x}px,${y}px,${z}px)`, h=ds/2, my3=(sy+end.y)/2;
+      frames=[{transform:T(sx,sy,cupH*.55),opacity:0,offset:0},{transform:T(sx+ds*.2,sy,cupH*.7),opacity:1,offset:.08},
+        {transform:T(mx,my3,ds*3),opacity:1,offset:.42},{transform:T(end.x,end.y,h),opacity:1,offset:.7},
+        {transform:T(end.x+ds*.06,end.y,h+ds*.8),opacity:1,offset:.83},{transform:T(end.x,end.y,h),opacity:1,offset:1}];
+    } else {
+      const T=(x,y,s)=>`translate(${x}px,${y}px) scale(${s})`;
+      frames=[{transform:T(sx,sy,.45),opacity:0,offset:0},{transform:T(sx+ds*.2,sy-ds*.2,.7),opacity:1,offset:.08},
+        {transform:T(mx,my,1.12),opacity:1,offset:.42},{transform:T(end.x,end.y,1),opacity:1,offset:.7},
+        {transform:T(end.x+ds*.06,end.y-ds*.35,1),opacity:1,offset:.83},{transform:T(end.x,end.y,1),opacity:1,offset:1}];
+    }
+    el.animate(frames, {duration:1000, delay:900+k*70, easing:'cubic-bezier(.3,.7,.4,1)', fill:'both'});
     const spinX=rx+(720+Math.floor(Math.random()*3)*360)*(k?1:-1), spinY=ry+(360+Math.floor(Math.random()*2)*360);
     el.firstChild.animate([
       {transform:`rotateX(${spinX}deg) rotateY(${spinY}deg) rotateZ(${90+Math.random()*180}deg)`},
@@ -1714,10 +1747,19 @@ function applyView(){
   b.style.setProperty('--tilt', VIEW.tilt+'deg'); b.style.setProperty('--spin', VIEW.spin+'deg'); b.style.setProperty('--zoom', VIEW.zoom);
   const btn=$('#btnView'); if(btn) btn.textContent = VIEW.mode==='3d' ? '🗺️ Vista 2D' : '🧊 Vista 3D';
   const f=$('#camFollow'); if(f) f.classList.toggle('on', VIEW.follow);
+  placeHud();
 }
+// en PC el panel de botones del 3D va arriba de la columna derecha (no tapa el tablero); en celular, abajo del tablero
+function placeHud(){
+  const hud=$('#hud'), side=document.querySelector('#game .side'), wrap=$('#boardwrap');
+  const wide = VIEW.mode==='3d' && window.innerWidth>900;
+  if(wide && hud.parentElement!==side) side.insertBefore(hud, side.firstChild);
+  if(!wide && hud.parentElement!==wrap) wrap.insertBefore(hud, $('#camctl'));
+}
+window.addEventListener('resize', placeHud);
 function toggleView(){
   VIEW.mode = VIEW.mode==='3d' ? '2d' : '3d'; saveView(); applyView();
-  if(S && S.phase!=='lobby'){ renderCenter(); camFollow(true); }
+  if(S && S.phase!=='lobby'){ renderTokens(); renderCenter(); camFollow(true); }
   toast(VIEW.mode==='3d' ? '🧊 Vista 3D: arrastrá el tablero para girarlo. Botones de cámara arriba a la derecha.' : '🗺️ Vista 2D (plana).');
 }
 function camSpin(d){ VIEW.follow=false; VIEW.spin+=d; applyView(); saveView(); }
@@ -1863,7 +1905,8 @@ function renderCenterInner(){
   const c=$('#center'); if(!c) return;
   const animating=Date.now()<diceEndAt+60, busy=Date.now()<uiHoldUntil;
   const r=S.roll||[1,1];
-  let h=`<div class="clogo">BANQUERO<small>PARAGUAYO</small></div><div class="dice" id="diceSpot" style="visibility:${animating?'hidden':'visible'}">${dieHTML(r[0])}${dieHTML(r[1])}</div><!--HUD-->`;
+  const dieV = VIEW.mode==='3d' ? die3HTML : dieHTML;
+  let h=`<div class="clogo">BANQUERO<small>PARAGUAYO</small></div><div class="dice" id="diceSpot" style="visibility:${animating?'hidden':'visible'}">${dieV(r[0],0)}${dieV(r[1],1)}</div><!--HUD-->`;
   if(busy){
     c.innerHTML=h+`<div class="status">${animating?'🎲 Tirando los dados…':`${r[0]} + ${r[1]} = ${r[0]+r[1]}${r[0]===r[1]?' · ¡Dobles!':''} — avanzando…`}</div>`;
     return;
