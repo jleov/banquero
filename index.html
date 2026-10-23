@@ -681,7 +681,8 @@ function land(p, dice, mode){
       const amt=rentOf(p.pos,dice,mode);
       if(p.money>=amt && !(p.bot && owner.bot)){   // se paga en mano: el que cae elige los billetes y el dueño da el vuelto
         syncBills(p); syncBills(owner);
-        S.rent={id:++S.rentSeq, from:p.id, to:owner.id, amt, idx:p.pos, stage:'pay', paid:null, change:0, at:Date.now()};
+        S.rentSeq=(S.rentSeq||0)+1;
+        S.rent={id:S.rentSeq+'-'+Math.random().toString(36).slice(2,8), from:p.id, to:owner.id, amt, idx:p.pos, stage:'pay', paid:null, change:0, at:Date.now()};
         S.tp='rent'; log(`💵 ${p.name} tiene que pagarle ${fmt(amt)} a ${owner.name} (alquiler de ${sp.n}).`);
         return;
       }
@@ -1442,7 +1443,8 @@ function renderGame(){
   // alquiler en mano: abrir solo la ventana de billetes al que le toca actuar
   if(m.dataset.kind==='bank') showBank(true);
   if(m.dataset.kind==='rentpick') showRentPicker(true);
-  else if(S.rent){ const R=S.rent, key=R.id+R.stage; if(key!==openedRent && canAct(R.stage==='pay'?R.from:R.to)){ openedRent=key; showRentPicker(); } }
+  if(!S.rent){ PICK={key:null, sel:{}, exch:false}; openedRent=null; }   // transacción cerrada: no queda nada guardado
+  else if(S.rent){ const R=S.rent, key=R.id+':'+R.stage; if(key!==openedRent && canAct(R.stage==='pay'?R.from:R.to)){ openedRent=key; showRentPicker(); } }
   if(S.rent && S.rent.stage==='change'){ clearTimeout(rentTimer); rentTimer=setTimeout(()=>{ if(S&&S.rent) renderCenter(); }, 31000-(Date.now()-S.rent.at)); }
 }
 
@@ -1479,7 +1481,7 @@ function showRentPicker(refresh){
   if(refresh && r.dataset.kind!=='rentpick') return;
   const actorId = R ? (R.stage==='pay'?R.from:R.to) : null;
   if(!R || !canAct(actorId)){ if(r.dataset.kind==='rentpick') closeModal(); return; }
-  const key=R.id+R.stage; if(PICK.key!==key) PICK={key, sel:{}, exch:false};
+  const key=R.id+':'+R.stage; if(PICK.key!==key) PICK={key, sel:{}, exch:false};
   const me=P(actorId), other=P(R.stage==='pay'?R.to:R.from), paying=R.stage==='pay';
   const bills=me.bills||{}, sel=PICK.sel, tot=billTotal(sel), target=paying?R.amt:R.change;
   const avail=BILLS.filter(b=>(bills[b.v]||0)-(sel[b.v]||0)>0);
@@ -1514,7 +1516,8 @@ function pickBill(v){
 function unpickBill(v){ if(PICK.sel[v]){ PICK.sel[v]--; if(!PICK.sel[v]) delete PICK.sel[v]; } showRentPicker(true); }
 function confirmPick(){
   const R=S.rent; if(!R) return; const paying=R.stage==='pay';
-  doAct({type:paying?'rentPay':'rentChange', bills:PICK.sel}, paying?R.from:R.to);
+  const sel=PICK.sel; PICK.sel={};   // lo entregado ya no queda seleccionado
+  doAct({type:paying?'rentPay':'rentChange', bills:sel}, paying?R.from:R.to);
 }
 
 function renderCenter(){
@@ -1873,6 +1876,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
+  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null;
   $('#board').innerHTML=''; $('#cardRoot').innerHTML=''; $('#cardRoot').dataset.id=''; netBar(false); show('menu'); refreshResume();
 }
 
