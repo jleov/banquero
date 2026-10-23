@@ -178,6 +178,7 @@ body.v3d .side > #hud{position:static;transform:none;width:auto;box-shadow:0 4px
 .gone.idle{background:#fff1d6;border-color:#e9a23b;color:#3a2a00}
 .cardidle{margin-top:10px;pointer-events:auto;text-align:left;color:#222;font-size:13px}
 .cardidle .acts{justify-content:flex-start}
+body > #comm{display:none !important}   /* el chat solo se muestra dentro de la sala o la partida */
 .observer{background:#eef3ff;border:1px solid #9db4e8;border-radius:10px;padding:10px;font-size:13.5px;line-height:1.4}
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
@@ -322,6 +323,11 @@ body.v3d .side > #hud{position:static;transform:none;width:auto;box-shadow:0 4px
       <p class="muted">Pasen el celular o la PC de mano en mano (2 a 6 jugadores). Tocá 👤/🤖 para que un lugar lo juegue un bot.</p>
       <div id="localNames"></div>
       <div class="row" style="margin-top:8px"><button class="btn gray" id="btnAddLocal">+ Jugador</button><button class="btn gold" id="btnLocal">Empezar</button></div>
+    </div>
+    <div class="box" id="installBox">
+      <h3>📲 Instalar el juego</h3>
+      <p class="muted" style="margin-top:0">Instalalo como app en tu celular o PC: queda con su ícono, se abre en pantalla completa y sin buscar el enlace.</p>
+      <button class="btn green wide" id="btnInstall">📲 Instalar en este dispositivo</button>
     </div>
     <button class="btn gray wide" onclick="showRules()">📜 Reglas del juego</button>
   </div>
@@ -2448,6 +2454,33 @@ refreshResume();
 const lastClient=load('bnq_client');
 if(lastClient && lastClient.code===hashCode && Date.now()-lastClient.at < 12*3600e3 && $('#myName').value.trim()) clientJoin(hashCode);
 if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+/* ====================== INSTALAR COMO APP ====================== */
+let installPrompt=null;
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone===true;
+function refreshInstall(){ $('#installBox').style.display = isInstalled() ? 'none' : 'block'; }
+// Chrome y Edge (Android y PC) avisan que se puede instalar: guardamos ese aviso para usarlo con nuestro botón
+window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); installPrompt=e; refreshInstall(); });
+window.addEventListener('appinstalled', ()=>{ installPrompt=null; refreshInstall(); toast('✅ ¡Listo! El Banquero quedó instalado. Buscalo con su ícono.'); });
+$('#btnInstall').onclick=async()=>{
+  if(installPrompt){
+    installPrompt.prompt();
+    const r=await installPrompt.userChoice.catch(()=>({outcome:'dismissed'}));
+    if(r.outcome==='accepted') toast('📲 Instalando el Banquero…');
+    installPrompt=null; return;
+  }
+  // el navegador no ofrece el botón automático: explicamos cómo hacerlo a mano según el dispositivo
+  const ua=navigator.userAgent, ios=/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document), android=/Android/i.test(ua);
+  const safari=/Safari/i.test(ua) && !/Chrome|CriOS|FxiOS|EdgiOS/i.test(ua);
+  let pasos;
+  if(ios) pasos = safari
+    ? `<ol><li>Tocá el botón <b>Compartir</b> <span style="font-size:20px">⬆️</span> (abajo en el iPhone, arriba en el iPad).</li><li>Deslizá y elegí <b>“Agregar a pantalla de inicio”</b>.</li><li>Tocá <b>“Agregar”</b>. Va a aparecer el ícono del Banquero.</li></ol>`
+    : `<p>En iPhone y iPad solo se puede instalar desde <b>Safari</b>. Copiá el enlace, abrilo en Safari y seguí estos pasos:</p><ol><li>Botón <b>Compartir</b> ⬆️</li><li><b>“Agregar a pantalla de inicio”</b></li></ol>`;
+  else if(android) pasos = `<ol><li>Abrí el juego en <b>Chrome</b>.</li><li>Tocá el menú <b>⋮</b> (arriba a la derecha).</li><li>Elegí <b>“Instalar app”</b> o <b>“Agregar a pantalla principal”</b>.</li></ol><p class="muted">Si no aparece, recargá la página y esperá unos segundos: Chrome la ofrece cuando terminó de cargar.</p>`;
+  else pasos = `<ol><li>Abrí el juego en <b>Chrome</b> o <b>Edge</b>.</li><li>En la barra de direcciones, a la derecha, tocá el ícono de <b>instalar</b> (una pantallita con una flecha ⊕).</li><li>O en el menú <b>⋮</b> → <b>“Instalar Banquero Paraguayo”</b> (en Edge: <b>Aplicaciones → Instalar este sitio como aplicación</b>).</li></ol>`;
+  modal(`<h3>📲 Cómo instalar el Banquero</h3>${pasos}<p class="muted">El juego queda con su ícono 🟡₲ y se abre como una app, en pantalla completa.</p>`,'install');
+};
+refreshInstall();
 </script>
 </body>
 </html>
