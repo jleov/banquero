@@ -8,7 +8,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- librería de conexión entre jugadores (PeerJS 1.5.4), guardada junto al juego para no depender de otro sitio -->
+<script src="peerjs.min.js"></script>
+<script>if(!window.Peer) document.write('<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');</script>
 <style>
 :root{--felt:#0b3d2e;--cream:#f6f1e1;--ink:#1d1d1d;--red:#d52b1e;--blue:#0038a8;--gold:#e9b949;--muted:#6b6b6b;--line:#2a2a2a}
 *{box-sizing:border-box}
@@ -334,6 +336,11 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
       <p class="muted">Pasen el celular o la PC de mano en mano (2 a 6 jugadores). Tocá 👤/🤖 para que un lugar lo juegue un bot.</p>
       <div id="localNames"></div>
       <div class="row" style="margin-top:8px"><button class="btn gray" id="btnAddLocal">+ Jugador</button><button class="btn gold" id="btnLocal">Empezar</button></div>
+    </div>
+    <div class="box">
+      <h3>🔗 Enlaces del juego</h3>
+      <p class="muted" style="margin-top:0">Si un enlace no abre, usá el otro. Es el mismo juego: las salas y los códigos sirven en los dos, así que pueden jugar juntos aunque cada uno entre por un enlace distinto.</p>
+      <div id="gameLinks"></div>
     </div>
     <div class="box" id="installBox">
       <h3>📲 Instalar el juego</h3>
@@ -2534,10 +2541,21 @@ $('#btnJoin').onclick=()=>{
 };
 $('#btnStart').onclick=()=>doAct({type:'start'});
 $('#btnAddBot').onclick=()=>doAct({type:'addBot'});
+// los dos lugares donde está publicado el juego (si uno se cae, se usa el otro)
+const GAME_LINKS=[{n:'Principal (GitHub)', u:'https://jleov.github.io/banquero/'}, {n:'Alternativo (Cloudflare)', u:'https://banquero-paraguayo.pages.dev/'}];
+const sameSite = u => location.href.startsWith(u) || (location.origin+location.pathname)===u;
+function renderGameLinks(){
+  $('#gameLinks').innerHTML=GAME_LINKS.map(l=>`<div class="prow" style="justify-content:space-between">
+    <span class="pn">${sameSite(l.u)?'✅ ':''}${l.n}<br><a href="${l.u}" style="font-weight:600;word-break:break-all">${l.u.replace('https://','')}</a></span>
+    <button class="btn sm gray" style="flex:0 0 auto" onclick="navigator.clipboard.writeText('${l.u}').then(()=>toast('Enlace copiado.'),()=>toast('${l.u}'))">📋 Copiar</button></div>`).join('')
+    + `<p class="muted" style="margin:6px 0 0">${GAME_LINKS.some(l=>sameSite(l.u))?'✅ = el enlace que estás usando ahora.':''}</p>`;
+}
+renderGameLinks();
 const shareUrl=()=>location.origin+location.pathname+'#'+NET.code;
+const otherLink=()=>{ const o=GAME_LINKS.find(l=>!sameSite(l.u)); return o ? o.u+'#'+NET.code : ''; };
 $('#btnCopy').onclick=()=>{ navigator.clipboard.writeText(shareUrl()).then(()=>toast('Enlace copiado.'),()=>toast(shareUrl())); };
 $('#btnShare').onclick=()=>{
-  const text=`¡Vení a jugar al Banquero Paraguayo! Código de sala: ${NET.code}`;
+  const text=`¡Vení a jugar al Banquero Paraguayo! Código de sala: ${NET.code}${otherLink()?` (si el enlace no abre, probá este otro: ${otherLink()})`:''}`;
   if(navigator.share) navigator.share({title:'Banquero Paraguayo', text, url:shareUrl()}).catch(()=>{});
   else window.open('https://wa.me/?text='+encodeURIComponent(text+' '+shareUrl()));
 };
