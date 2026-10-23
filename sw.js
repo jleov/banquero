@@ -1,6 +1,6 @@
-// Service worker mínimo: permite instalar el juego como app en Android.
-// Guarda el juego en caché para que abra rápido; la partida en línea siempre necesita internet.
-const CACHE = 'banquero-v7';
+﻿// Service worker mÃ­nimo: permite instalar el juego como app en Android.
+// Guarda el juego en cachÃ© para que abra rÃ¡pido; la partida en lÃ­nea siempre necesita internet.
+const CACHE = 'banquero-v8';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './peerjs.min.js', './dados.mp3', './contadora.mp3', './caja.mp3', './musica.mp3'];
 
 self.addEventListener('install', e => {
@@ -12,7 +12,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  // red primero, caché si no hay conexión
+  // red primero, cachÃ© si no hay conexiÃ³n
   e.respondWith(fetch(e.request).then(r => {
     const copy = r.clone();
     caches.open(CACHE).then(c => c.put(e.request, copy));

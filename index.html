@@ -1225,7 +1225,8 @@ function commit(){
   if(S && S.phase!=='lobby' && NET.mode!=='client') S.players.forEach(syncBills);
   if(NET.mode==='host'){
     for(const pid in NET.conns){ const c=NET.conns[pid]; if(c && c.open) try{ c.send({t:'state', s:publicState(pid)}); }catch(e){} }
-    store('bnq_host',{code:NET.code, S, CHAT:CHAT.slice(-80), myPid:NET.myPid, at:Date.now()});
+    sendBackups();
+    if(!NET.noSave) store('bnq_host',{code:NET.code, S, CHAT:CHAT.slice(-80), myPid:NET.myPid, at:Date.now()});
   } else if(NET.mode==='local'){
     store('bnq_local',{S, at:Date.now()});
   }
@@ -1259,25 +1260,125 @@ function hostStart(resume){
     sysChat('Sala '+NET.code+' creada. Esperando jugadores…');
     commit();
   });
+  wireHostPeer(peer, ()=>{
+    if(resume){ toast('La sala ya está abierta (puede que otro jugador haya quedado de anfitrión). Entrá con “Volver a la sala”.'); peer.destroy(); NET.mode=null; return; }
+    peer.destroy(); hostStart(false);
+  });
+  show('lobby'); $('#lobbyCode').textContent=NET.code;
+}
+// conexiones del anfitrión (se usa al crear la sala y cuando otro jugador toma el mando)
+function wireHostPeer(peer, onIdTaken){
+  peer.on('open', ()=>{ peer._wasOpen=true; });
   peer.on('connection', conn=>{
-    conn.on('data', d=>hostOnData(conn,d));
+    conn.lastSeen=Date.now();
+    conn.on('data', d=>{ conn.lastSeen=Date.now(); hostOnData(conn,d); });
     conn.on('close', ()=>hostOnClose(conn));
     conn.on('error', ()=>hostOnClose(conn));
   });
   peer.on('call', onCall);
   peer.on('disconnected', ()=>{ if(!peer.destroyed) setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); });
   peer.on('error', e=>{
-    if(e.type==='unavailable-id'){
-      if(resume){ toast('El código de la sala todavía está ocupado. Probá de nuevo en unos segundos.'); peer.destroy(); NET.mode=null; return; }
-      peer.destroy(); hostStart(false); return;
-    }
+    if(e.type==='unavailable-id'){ if(peer._wasOpen) demoteToClient(); else onIdTaken(); return; }
     if(e.type==='peer-unavailable') return;
     console.warn(e); if(e.type==='network'||e.type==='server-error'||e.type==='socket-error') netBar(true,'Problema de conexión con el servidor. Reintentando…');
   });
-  show('lobby'); $('#lobbyCode').textContent=NET.code;
+}
+// el anfitrión estuvo afuera (app en segundo plano o sin internet) y mientras tanto otro jugador tomó el mando:
+// vuelve a la sala como jugador
+function demoteToClient(){
+  if(NET.mode!=='host') return;
+  try{ NET.peer.destroy(); }catch(e){}
+  Object.values(NET.conns).forEach(c=>{ try{ c.close(); }catch(e){} }); NET.conns={};
+  NET.noSave=false; store('bnq_host', undefined);
+  toast('👑 Mientras no estabas, otro jugador quedó de anfitrión. Volvés a la sala como jugador.');
+  const code=NET.code; NET.mode=null; clientJoin(code);
+}
+// "pulso" para notar cortes bruscos (la conexión no siempre avisa cuando alguien cierra la app de golpe)
+setInterval(()=>{
+  if(NET.mode==='host'){
+    for(const pid in NET.conns){ const c=NET.conns[pid]; if(!c) continue;
+      if(Date.now()-(c.lastSeen||0)>15000){ try{ c.close(); }catch(e){} hostOnClose(c); continue; }   // ese jugador se cortó
+      if(c.open) try{ c.send({t:'ping'}); }catch(e){} }
+  } else if(NET.mode==='client' && NET.welcomed){
+    if(NET.hostConn && NET.hostConn.open) try{ NET.hostConn.send({t:'ping'}); }catch(e){}
+    if(Date.now()-(NET.lastHostMsg||Date.now())>10000){   // el anfitrión no da señales
+      if(!NET.hostLost){ NET.hostLost=true; netBar(true,'El anfitrión no responde. Reconectando…'); scheduleTakeover(); }
+      if(Date.now()-(NET.lastTry||0)>8000){   // reintento seguido: puede que otro jugador ya haya quedado de anfitrión
+        NET.lastTry=Date.now();
+        const c=NET.hostConn; NET.hostConn=null; try{ c && c.close(); }catch(e){}
+        connectHost();
+      }
+    }
+  }
+}, 3000);
+
+/* ====== TRASPASO DE ANFITRIÓN ======
+   El anfitrión le manda una copia completa de la partida al 1º y 2º de la fila (por orden de llegada).
+   Si el anfitrión sale (o se corta), el primero de la fila toma el mismo código de sala y la partida sigue;
+   los demás se reconectan solos porque el código no cambia. */
+const numId = id => +String(id).slice(1);
+function hostCandidates(s){
+  return (s.players||[]).filter(p=>!p.bot && p.id!==s.hostPid && p.conn).sort((a,b)=>((a.bk?1:0)-(b.bk?1:0)) || (numId(a.id)-numId(b.id)));
+}
+function sendBackups(){
+  if(NET.mode!=='host' || !S) return;
+  const msg={t:'backup', s:S, chat:CHAT.slice(-80)};
+  hostCandidates(S).slice(0,2).forEach(p=>{ const c=NET.conns[p.id]; if(c && c.open) try{ c.send(msg); }catch(e){} });
+}
+function hostHandover(){   // el anfitrión sale: le pasa el mando al siguiente de la fila
+  const next=hostCandidates(S)[0]; if(!next) return leaveToMenu();
+  const me=P(NET.myPid); if(me){ me.conn=false; me.mic=false; me.offAt=Date.now(); }
+  const c=NET.conns[next.id];
+  try{ c.send({t:'migrate', s:S, chat:CHAT.slice(-80)}); }catch(e){}
+  NET.noSave=true;   // desde ahora este dispositivo ya no guarda la sala como propia
+  store('bnq_host', undefined); store('bnq_client', {code:NET.code, at:Date.now()});   // vuelve como jugador, no como anfitrión
+  toast(`👑 ${next.name} quedó como anfitrión. Podés volver a la sala como jugador.`);
+  setTimeout(()=>leaveToMenu(), 1200);
+}
+function scheduleTakeover(){   // el anfitrión dejó de responder: si soy el siguiente, espero un poco y tomo el mando
+  if(NET.mode!=='client' || !NET.backup || NET.takeoverTimer) return;
+  const pos=hostCandidates(NET.backup.s).map(p=>p.id).indexOf(NET.myPid);
+  if(pos<0 || pos>1) return;
+  NET.takeoverTimer=setTimeout(()=>{ NET.takeoverTimer=null;
+    if(NET.mode==='client' && !(NET.hostConn && NET.hostConn.open)) takeoverHost('auto'); }, pos===0 ? 8000 : 20000);
+}
+function takeoverHost(reason){
+  if(NET.mode!=='client' || !NET.backup) return;
+  const bk=NET.backup, oldId=bk.s.hostPid, pristine=JSON.parse(JSON.stringify(bk));
+  clearTimeout(NET.takeoverTimer); NET.takeoverTimer=null;
+  try{ if(NET.hostConn) NET.hostConn.close(); }catch(e){}
+  try{ NET.peer.destroy(); }catch(e){}
+  NET.mode='host'; NET.conns={}; NET.hostConn=null; NET.obs=null; NET.backup=null; NET.hostLost=false;
+  S=bk.s; CHAT=bk.chat||[]; renderChat();
+  const me=P(NET.myPid), old=P(oldId);
+  S.players.forEach(p=>{ if(p.id!==NET.myPid && !p.bot){ p.conn=false; p.mic=false; } });
+  (S.observers||[]).forEach(o=>{ o.conn=false; o.mic=false; });
+  if(old){ if(S.phase==='lobby') S.players=S.players.filter(p=>p!==old); else old.offAt=Date.now(); }
+  S.hostPid=NET.myPid; S.handoff=null;
+  netBar(true,'👑 Tomando el mando de la sala…');
+  const claim=()=>{
+    const peer=NET.peer=newPeer(PREFIX+NET.code);
+    peer.on('open', id=>{
+      netBar(false); me.peerId=id; me.conn=true;
+      sysChat(`👑 ${me.name} ahora es el anfitrión${old?` (${old.name} ${reason==='handover'?'salió':'se desconectó'})`:''}. La partida sigue.`);
+      if(S.phase!=='lobby') log(`👑 ${me.name} pasa a ser el anfitrión de la sala.`);
+      toast('👑 Ahora sos el anfitrión: la partida sigue desde tu dispositivo. No cierres el juego.');
+      commit();
+    });
+    wireHostPeer(peer, ()=>{
+      // el código de la sala ya está tomado: otro jugador se adelantó (o el anfitrión volvió).
+      // vuelvo como jugador; si en realidad nadie responde, el pulso lo nota y se vuelve a intentar
+      peer.destroy();
+      NET.mode=null; clientJoin(NET.code); NET.welcomed=true; NET.backup=pristine; S=JSON.parse(JSON.stringify(pristine.s));
+      netBar(true,'Reconectando con el anfitrión…');
+    });
+  };
+  claim();
 }
 function hostOnData(conn, d){
   if(!d || typeof d!=='object') return;
+  if(d.t==='ping'){ try{ conn.send({t:'pong'}); }catch(e){} return; }   // se responde al instante aunque la pestaña esté en segundo plano
+  if(d.t==='pong') return;
   if(d.t==='hello'){
     if(d.token===myToken) d.token+='-'+conn.peer;   // mismo navegador que el anfitrión (otra pestaña)
     S.observers=S.observers||[];
@@ -1383,7 +1484,7 @@ function pushChat(m){
 
 // ---------- cliente ----------
 function clientJoin(code){
-  NET.mode='client'; NET.code=code; NET.welcomed=false;
+  NET.mode='client'; NET.code=code; NET.welcomed=false; NET.hostLost=false; NET.lastHostMsg=Date.now();
   const peer = NET.peer = newPeer();
   peer.on('open', ()=>connectHost());
   peer.on('call', onCall);
@@ -1391,7 +1492,7 @@ function clientJoin(code){
   peer.on('error', e=>{
     if(e.type==='peer-unavailable'){
       if(!NET.welcomed){ toast('No se encontró la sala '+code+'. Revisá el código.'); leaveToMenu(); }
-      else { netBar(true,'El anfitrión no responde. Reintentando…'); setTimeout(connectHost,3000); }
+      else { netBar(true,'El anfitrión no responde. Reintentando…'); setTimeout(connectHost,3000); scheduleTakeover(); }
       return;
     }
     console.warn(e);
@@ -1403,16 +1504,20 @@ function connectHost(){
   if(NET.hostConn && NET.hostConn.open) return;
   const c = NET.peer.connect(PREFIX+NET.code, {reliable:true});
   NET.hostConn=c;
-  c.on('open', ()=>{ netBar(false); c.send({t:'hello', name:myName(), emoji:myEmoji(), token:myToken}); });
-  c.on('data', clientOnData);
-  c.on('close', ()=>{ if(NET.mode!=='client' || NET.hostConn!==c) return; netBar(true,'Se perdió la conexión con el anfitrión. Reconectando…'); setTimeout(connectHost,3000); });
+  c.on('open', ()=>{ netBar(false); clearTimeout(NET.takeoverTimer); NET.takeoverTimer=null; c.send({t:'hello', name:myName(), emoji:myEmoji(), token:myToken}); });
+  c.on('data', d=>{ if(NET.hostConn!==c) return; NET.lastHostMsg=Date.now(); if(NET.hostLost){ NET.hostLost=false; netBar(false); } clientOnData(d); });
+  c.on('close', ()=>{ if(NET.mode!=='client' || NET.hostConn!==c) return; netBar(true,'Se perdió la conexión con el anfitrión. Reconectando…'); setTimeout(connectHost,3000); scheduleTakeover(); });
 }
 function clientOnData(d){
+  if(d.t==='ping'){ try{ NET.hostConn.send({t:'pong'}); }catch(e){} return; }
+  if(d.t==='pong') return;
   if(d.t==='welcome'){ NET.myPid=d.pid; NET.obs=d.obs||null; NET.welcomed=true; NET.taken=null; store('bnq_client',{code:NET.code, at:Date.now()}); if(location.hash!=='#'+NET.code) history.replaceState(null,'','#'+NET.code);
     if(d.why && (!NET.obsToasted || d.force)){ NET.obsToasted=true; toast(d.why); }
     if(d.force){ VOICE.muteSeq=null; stopMic(false); closeModal(); } }   // cambió de lugar (jugador ↔ observador)
   else if(d.t==='state'){ S=d.s; render(); checkForcedMute(); }
   else if(d.t==='chat'){ CHAT.push(d.m); renderChat(d.m); }
+  else if(d.t==='backup'){ NET.backup={s:d.s, chat:d.chat}; }                        // copia por si me toca ser anfitrión
+  else if(d.t==='migrate'){ NET.backup={s:d.s, chat:d.chat}; takeoverHost('handover'); }   // el anfitrión se va y me pasa el mando
   else if(d.t==='chatlog'){ CHAT=d.list||[]; renderChat(); }
   else if(d.t==='err'){
     toast(d.m);
@@ -2535,6 +2640,7 @@ function leaveToMenu(){
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
   musicStop();
+  if(NET.noSave){ store('bnq_host', undefined); NET.noSave=false; }   // le pasó el mando a otro: no queda "Reanudar como anfitrión"
   PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; sfxLogSeq=-1; VOICE.muteSeq=null; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
   // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
   [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
@@ -2598,12 +2704,16 @@ function resumeClient(code){
 function confirmLeave(){
   const me=S && S.phase==='play' && meId() ? P(meId()) : null;
   const playing = me && !me.bk && !me.bot;
-  const msg = NET.mode==='host' && S.phase!=='lobby' ? 'La partida queda guardada en este dispositivo. Tus amigos quedan esperando hasta que vuelvas con “Reanudar como anfitrión”.'
+  const nextHost = NET.mode==='host' ? hostCandidates(S)[0] : null;   // quién queda de anfitrión si salgo
+  const msg = nextHost ? `Si salís, <b>${esc(nextHost.name)}</b> queda como anfitrión y la partida sigue sin cortarse. Después podés volver a entrar como jugador con “Volver a la sala”.`
+    : NET.mode==='host' && S.phase!=='lobby' ? 'La partida queda guardada en este dispositivo. Tus amigos quedan esperando hasta que vuelvas con “Reanudar como anfitrión”.'
     : NET.mode==='host' ? 'Se cierra la sala y tus amigos salen de ella.'
     : NET.mode==='client' && NET.obs ? 'Dejás de mirar la partida. Podés volver a mirarla con “Volver a la sala”.'
     : NET.mode==='client' ? (me&&me.bk ?'Salís de la sala. Si volvés con “Volver a la sala”, entrás como observador.' : 'Salís de la sala un rato. Podés volver con “Volver a la sala” y recuperás tu lugar.')
     : 'La partida queda guardada. Podés seguirla con “Continuar partida”.';
-  let h=`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">${playing?'Salir un rato (sigo jugando después)':'Sí, volver al inicio'}</button>`;
+  let h = nextHost
+    ? `<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();hostHandover()">👑 Salir y dejar a ${esc(nextHost.name)} de anfitrión</button>`
+    : `<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">${playing?'Salir un rato (sigo jugando después)':'Sí, volver al inicio'}</button>`;
   const obsOn=(S.observers||[]).filter(o=>o.conn);
   if(playing && NET.mode==='client' && obsOn.length) h+=`<div class="observer" style="margin-top:14px"><b>🔁 ¿Querés que alguien siga tu partida?</b><br>Le podés ceder tu lugar a un observador: sigue jugando con tu ficha, tu plata y tus propiedades, y vos te quedás mirando.
     <button class="btn green wide" style="margin-top:8px" onclick="showHandoff()">🔁 Ceder mi lugar a un observador</button></div>`;
@@ -2640,7 +2750,7 @@ function confirmRetire(){
     <p>${NET.mode==='local'?`<b>${esc(me.name)}</b> se declara`:'Te declarás'} en <b>bancarrota voluntaria</b>:</p>
     <ul style="font-size:14px;line-height:1.5"><li>Tus propiedades, casas y hoteles vuelven al Banco.</li><li>Tu dinero se devuelve al Banco.</li><li>Ya no jugás más esta partida, ni podés volver a jugarla.</li>
       ${NET.mode==='local'?'':`<li>Si volvés antes de que termine, entrás como <b>observador 👀</b>: ves el tablero y podés chatear.</li>`}</ul>
-    ${isHost?'<p class="observer"><b>⚠️ Sos el anfitrión:</b> la partida funciona desde tu dispositivo. Si te retirás, dejá el juego abierto (podés mirar como observador) para que los demás puedan terminar.</p>':''}
+    ${isHost?'<p class="observer"><b>⚠️ Sos el anfitrión:</b> si te retirás podés quedarte mirando; y si después salís con 🏠 Inicio, el mando pasa al siguiente jugador y la partida sigue.</p>':''}
     <button class="btn red wide" onclick="doRetire()">Sí, me retiro</button>`,'retire');
 }
 function doRetire(){
