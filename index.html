@@ -172,6 +172,12 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tr2{display:flex;justify-content:space-between;gap:4px;padding:2px 3px;border-bottom:1px dotted #ddd;border-radius:3px}
 .tr2.now{background:#fff1a8;font-weight:800}
 .tr2 b{white-space:nowrap}
+.rentbox{margin-top:6px;background:#e7f6ea;border:1px solid #2a9d3f;border-radius:6px;padding:5px 6px;text-align:center;font-size:11.5px}
+.rentbox b{display:block;font-size:15px;color:#1b6b2c}
+.rentbox small{display:block;color:#555}
+.rentbox.buyable{background:#fff7dd;border-color:#e9b949}.rentbox.buyable b{color:#8a5a00}
+.tcard.mort .rentbox{background:#fde8e6;border-color:var(--red)}.tcard.mort .rentbox b{color:var(--red)}
+.pr.rent{color:#1b6b2c;font-weight:800}
 .tsep{height:5px}
 .tfoot{margin-top:auto;padding-top:6px}
 .owner{display:flex;align-items:center;gap:4px;font-weight:700;flex-wrap:wrap}
@@ -483,6 +489,38 @@ function rentOf(i,dice,mode){
   if(sp.t==='tr'){ const r=[0,25,50,100,200][countType(o.o,'tr')]*K; return mode==='x2'? r*2 : r; }
   if(sp.t==='ut'){ const m = mode==='x10' ? 10 : (countType(o.o,'ut')===2 ? 10 : 4); return dice*m*K; }
   return 0;
+}
+
+// alquiler que paga hoy quien cae en la propiedad i
+function rentNow(i){
+  const o=S.props[i], sp=B[i]; if(!o) return null;
+  if(o.m) return {txt:'No cobra (hipotecada)', short:'—'};
+  if(sp.t==='ut'){ const m=countType(o.o,'ut')===2?10:4; return {txt:`${m} × dados (ej.: con 7 → ${fmt(7*m*K)})`, short:'×'+m}; }
+  const v=rentOf(i,0,null); return {txt:fmt(v), short:fmtS(v), v};
+}
+// cuánto cobraría pid si compra la propiedad i (contando lo que ya tiene del grupo)
+function rentIfBought(pid,i){
+  const sp=B[i];
+  if(sp.t==='st'){ const full=groupIdx(sp.g).every(j=>j===i || (S.props[j]&&S.props[j].o===pid)); return fmt(sp.r[0]*K*(full?2:1))+(full?' (¡grupo completo!)':''); }
+  if(sp.t==='tr') return fmt([0,25,50,100,200][countType(pid,'tr')+1]*K);
+  if(sp.t==='ut') return (countType(pid,'ut')+1===2?'10':'4')+' × dados';
+  return '';
+}
+function groupHave(pid,i){
+  const sp=B[i];
+  if(sp.t==='st'){ const g=groupIdx(sp.g), n=g.filter(j=>S.props[j]&&S.props[j].o===pid).length; return {n, of:g.length, text:`Del grupo ${GROUPS[sp.g].n.toLowerCase()} tenés ${n} de ${g.length}`}; }
+  const n=countType(pid,sp.t), of=sp.t==='tr'?4:2;
+  return {n, of, text:`Tenés ${n} de ${of} ${sp.t==='tr'?'transportes':'servicios'}`};
+}
+function showBuyTitle(refresh){
+  const r=$('#modalRoot');
+  if(refresh && r.dataset.kind!=='buy') return;
+  if(S.tp!=='buy' || S.pendingBuy==null){ if(refresh) closeModal(); return; }
+  const i=S.pendingBuy, p=cur(), sp=B[i], mine=canAct(p.id);
+  let h=`<h3>🃏 ${mine?'¿Comprás este título?':esc(p.name)+' está por decidir'}</h3><div style="max-width:260px;margin:0 auto 10px">${titleCard(i)}</div>`;
+  if(mine) h+=`<div class="row"><button class="btn green" ${p.money<sp.p*K?'disabled':''} onclick="closeModal();doAct({type:'buy'})">Comprar ${fmt(sp.p*K)}</button><button class="btn gray" onclick="closeModal();doAct({type:'skip'})">No comprar</button></div>
+    <button class="btn wide" style="margin-top:8px;background:#2a9d3f" onclick="showTitles('mine')">Ver mis títulos</button>`;
+  modal(h,'buy',i);
 }
 
 /* ====================== MOTOR (sólo anfitrión) ====================== */
@@ -1208,6 +1246,9 @@ function renderGame(){
     if(o) el.style.setProperty('--oc', P(o.o).color);
     if(sp.t==='st'){ const band=el.querySelector('.band'); const h=o?o.h:0;
       band.innerHTML = h===5 ? '<span class="hh"></span>' : '<span class="hs"></span>'.repeat(h); }
+    // con dueño, el casillero muestra el alquiler que se cobra hoy en lugar del precio
+    const pr=el.querySelector('.pr');
+    if(pr && sp.p){ const rn=rentNow(i); pr.textContent = rn ? '💰'+rn.short : fmtS(sp.p*K); pr.classList.toggle('rent', !!rn); }
   }
   renderTokens();
   // tarjeta
@@ -1224,7 +1265,7 @@ function renderGame(){
   if(prevOwned!=null && owned>prevOwned) SFX.buy(); else if(prevHouses!=null && houses>prevHouses) SFX.build();
   prevOwned=owned; prevHouses=houses;
   renderCenter(); renderPlayers(); renderTrades();
-  const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true); if(m.dataset.kind==='titles') showTitles(null, true);
+  const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true); if(m.dataset.kind==='titles') showTitles(null, true); if(m.dataset.kind==='buy') showBuyTitle(true);
 }
 
 function renderCenter(){
@@ -1259,11 +1300,12 @@ function renderCenter(){
         if(p.jcards.length) acts.push(`<button class="btn gold" onclick="doAct({type:'jailCard'})">Usar tarjeta “Salga libre”</button>`);
       } else acts.push(`<button class="btn red" style="font-size:1.25em" onclick="doAct({type:'roll'})">🎲 Tirar los dados</button>`);
     } else if(S.tp==='buy'){
-      const sp=B[S.pendingBuy];
-      h+=`<div class="pcard"><div class="bar" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></div><b>${sp.ic||''} ${sp.n}</b><br>Precio: <b>${fmt(sp.p*K)}</b></div>`;
+      const i=S.pendingBuy, sp=B[i], gh=groupHave(p.id,i);
+      h+=`<div class="pcard"><div class="bar" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></div><b>${sp.ic||''} ${sp.n}</b><br>Precio: <b>${fmt(sp.p*K)}</b>
+        <div style="font-size:.9em">Cobrarías: <b>${rentIfBought(p.id,i)}</b><br><span class="muted">${gh.text}</span></div></div>`;
       acts.push(`<button class="btn green" onclick="doAct({type:'buy'})" ${p.money<sp.p*K?'disabled':''}>Comprar</button>`,
                 `<button class="btn gray" onclick="doAct({type:'skip'})">No comprar</button>`,
-                `<button class="btn sm gold" onclick="showProp(${S.pendingBuy})">Ver alquileres</button>`);
+                `<button class="btn gold" onclick="showBuyTitle()">🃏 Ver título</button>`);
     } else if(S.tp==='end'){
       acts.push(`<button class="btn" onclick="doAct({type:'end'})">✔ Terminar turno</button>`);
     }
@@ -1422,6 +1464,9 @@ function titleCard(i){
     body = `<div class="tr2${n===1?' now':''}"><span>Con 1 servicio</span><b>4 × dados</b></div><div class="tr2${n===2?' now':''}"><span>Con ANDE y ESSAP</span><b>10 × dados</b></div>
       <div class="muted" style="font-size:10.5px;padding:2px">(× ₲ 10.000 por cada punto de los dados)</div><div class="tsep"></div>` + row('Valor de hipoteca',mortValue(i));
   }
+  const rn=rentNow(i);
+  body += o ? `<div class="rentbox">Si alguien cae hoy paga:<b>${rn.txt}</b></div>`
+            : (S.phase==='play' && meId() ? `<div class="rentbox buyable">Si la comprás cobrarías:<b>${rentIfBought(meId(),i)}</b><small>${groupHave(meId(),i).text}</small></div>` : '');
   let foot = o ? `<div class="owner"><span class="dot" style="background:${owner.color}"></span>${owner.emoji} ${esc(owner.name)}${o.h?` · ${o.h===5?'🏨 hotel':'🏠×'+o.h}`:''}</div>`
                : `<div class="owner muted">🏦 Del Banco · ${fmt(sp.p*K)}</div>`;
   if(mine && S.phase==='play'){
@@ -1479,7 +1524,7 @@ function showMyProps(refresh){
     }
     if(o.m){ if(canUnmort(pid,i)) b.push(`<button class="btn sm" onclick="doAct({type:'unmort',i:${i}},'${pid}')">Deshipotecar ${fmtS(unmortCost(i))}</button>`); }
     else if(canMort(pid,i)) b.push(`<button class="btn sm red" onclick="doAct({type:'mort',i:${i}},'${pid}')">Hipotecar +${fmtS(mortValue(i))}</button>`);
-    h+=`<div class="prow"><span class="sw" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></span><span class="pn">${sp.ic||''} ${sp.n}<br><span class="muted">${o.m?'Hipotecada':o.h===5?'Hotel':o.h?o.h+' casa(s)':sp.t==='st'&&ownsGroup(pid,sp.g)?'Grupo completo':''}</span></span>${b.join('')}</div>`;
+    h+=`<div class="prow"><span class="sw" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></span><span class="pn">${sp.ic||''} ${sp.n}<br><span class="muted">${o.m?'Hipotecada':o.h===5?'Hotel':o.h?o.h+' casa(s)':sp.t==='st'&&ownsGroup(pid,sp.g)?'Grupo completo':''}</span>${o.m?'':` <span style="color:#1b6b2c;font-weight:800">· cobra ${rentNow(i).short}</span>`}</span>${b.join('')}</div>`;
   }
   h+=`<p class="muted">Para construir necesitás todo el grupo de color, sin hipotecas, y construir parejo (una casa por calle a la vez).${isTurnOf(pid)?'':' Las hipotecas se hacen solo durante tu turno.'}</p>
     <button class="btn wide" style="background:#2a9d3f" onclick="showTitles('mine')">🃏 Ver mis títulos</button>`;
