@@ -111,6 +111,15 @@ input[type=text],input[type=number],select{width:100%;padding:9px 11px;border:1p
 .board div.on{background:var(--gold);color:#222}
 .board div.last{background:var(--red);color:#fff;animation:pulse 1s infinite alternate}
 @keyframes pulse{to{transform:scale(1.15)}}
+.voces{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.voz{background:#fff;border:2px solid #ddd2b5;border-radius:12px;padding:10px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.voz span{font-size:12px;color:var(--muted)}
+.voz.on{border-color:var(--green);background:#e4f7e7}
+.cantadas{background:rgba(255,255,255,.08);border-radius:14px;padding:4px 12px 12px;margin-top:14px}
+.orden{display:flex;flex-wrap:wrap;gap:6px}
+.orden>div{display:flex;flex-direction:column;align-items:center;color:rgba(255,255,255,.55);font-size:10px}
+.board div.late{animation:aparece .4s ease 1.9s both,pulse 1s 2.3s infinite alternate}
+.cell.mal{outline:3px solid #d00;outline-offset:-3px}
 details.tab{background:rgba(255,255,255,.08);border-radius:12px;padding:8px 12px;color:#fff;margin-bottom:12px}
 details.tab summary{cursor:pointer;font-weight:700}
 .sec{color:#fff;font-weight:800;font-size:16px;margin:14px 0 8px}
@@ -194,7 +203,7 @@ const dicho = n => DICHOS[n] || '';
 const UNID = ['','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez','once','doce','trece','catorce','quince','dieciséis','diecisiete','dieciocho','diecinueve','veinte','veintiuno','veintidós','veintitrés','veinticuatro','veinticinco','veintiséis','veintisiete','veintiocho','veintinueve'];
 const DEC = {3:'treinta',4:'cuarenta',5:'cincuenta',6:'sesenta',7:'setenta',8:'ochenta',9:'noventa'};
 const enLetras = n => n<30 ? UNID[n] : DEC[Math.floor(n/10)] + (n%10 ? ' y '+UNID[n%10] : '');
-const DEF_CFG = {precio:500, saldo:10000, max:4, serie:36, modo:'linea', pctLinea:30, aTiempo:true, falso:'anular', gracia:4, autoMark:false, tablero:true};
+const DEF_CFG = {precio:500, saldo:10000, max:4, serie:36, modo:'linea', pctLinea:30, aTiempo:true, falso:'nada', gracia:4};
 
 let S = null;   // estado del juego: el anfitrión es la autoridad, los demás reciben copias
 const NET = {mode:null, peer:null, conns:{}, hostConn:null, code:'', myPid:null, welcomed:false};
@@ -217,10 +226,28 @@ function beep(f=660, d=.12, type='sine', vol=.15, delay=0){
 }
 const fanfare = () => [523,659,784,1046].forEach((f,i)=>beep(f,.25,'triangle',.18,i*.13));
 const buzz = () => { beep(140,.5,'sawtooth',.12); };
-function say(txt){
-  if(!PREF.voz || !window.speechSynthesis) return;
-  try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(txt); u.lang='es-ES'; u.rate=.95;
-    const v=speechSynthesis.getVoices().find(v=>/^es/i.test(v.lang)); if(v) u.voice=v; speechSynthesis.speak(u); }catch(e){}
+// Cantores: cada uno usa una voz de hombre o de mujer del dispositivo con su propio tono y velocidad.
+// Las voces dependen del celular o la PC; si solo hay una voz en español, se cambia el tono.
+const CANTORES = [
+  {id:'don',     nombre:'🎩 Don Cantor',          desc:'El de siempre',            sexo:'h', pitch:1,    rate:.95},
+  {id:'dona',    nombre:'🌺 Doña Rosa',           desc:'Voz de mujer',             sexo:'m', pitch:1.05, rate:.95},
+  {id:'chica',   nombre:'💃 Mitãkuña alegre',     desc:'Mujer joven, rapidita',    sexo:'m', pitch:1.45, rate:1.1},
+  {id:'abuela',  nombre:'👵 Jarýi, la abuela',     desc:'Mujer, despacito',         sexo:'m', pitch:.8,   rate:.78},
+  {id:'abuelo',  nombre:'👴 Taita, el abuelo',     desc:'Voz gruesa y lenta',       sexo:'h', pitch:.6,   rate:.8},
+  {id:'locutor', nombre:'📻 Locutor de radio',    desc:'Hombre, con energía',      sexo:'h', pitch:.85,  rate:1.15}
+];
+const VOZ_M = /sabina|helena|laura|elvira|paulina|m[oó]nica|dalia|luc[ií]a|paloma|marisol|elena|catalina|ximena|isabel|camila|valentina|francisca|female|mujer|femen/i;
+const VOZ_H = /ra[uú]l|pablo|jorge|diego|[aá]lvaro|juan|carlos|enrique|tom[aá]s|gonzalo|jos[eé]|male|hombre|mascul/i;
+function vozPara(sexo){
+  const es=speechSynthesis.getVoices().filter(v=>/^es/i.test(v.lang));
+  const pref = sexo==='m' ? es.find(v=>VOZ_M.test(v.name) && !/\bmale\b/i.test(v.name)) : es.find(v=>VOZ_H.test(v.name) && !/female/i.test(v.name));
+  return pref || es[0] || null;
+}
+const cantorActual = () => CANTORES.find(c=>c.id===PREF.cantor) || CANTORES[0];
+function say(txt, forzar){
+  if((!PREF.voz && !forzar) || !window.speechSynthesis) return;
+  try{ speechSynthesis.cancel(); const c=cantorActual(), u=new SpeechSynthesisUtterance(txt); u.lang='es-ES';
+    u.rate=c.rate; u.pitch=c.pitch; const v=vozPara(c.sexo); if(v){ u.voice=v; u.lang=v.lang; } speechSynthesis.speak(u); }catch(e){}
 }
 // como el cantor de la lotería de casa: primero el dicho y después el número
 function cantarBolilla(n){ say(`${dicho(n)}... ¡El ${n}!`); }
@@ -265,7 +292,7 @@ function sanitizeCfg(c){
   return {
     precio:Math.round(n(c.precio,500,20000,500)/500)*500, saldo:+c.saldo===20000?20000:10000, max:n(c.max,1,12,4), serie:n(c.serie,6,120,36),
     modo:c.modo==='bingo'?'bingo':'linea', pctLinea:n(c.pctLinea,5,60,30), aTiempo:!!c.aTiempo,
-    falso:['anular','multa','nada'].includes(c.falso)?c.falso:'anular', gracia:n(c.gracia,2,10,4), autoMark:!!c.autoMark, tablero:!!c.tablero
+    falso:['anular','multa','nada'].includes(c.falso)?c.falso:'nada', gracia:n(c.gracia,2,10,4)
   };
 }
 function abrirVenta(){
@@ -400,7 +427,10 @@ function act(pid, a){
       if(tipo==='linea' && S.cfg.modo!=='linea') return 'En esta sala solo se juega cartón lleno.';
       if(!S.claim){ S.claim={until:Date.now()+S.cfg.gracia*1000, list:[]}; clearTimeout(T.claim); T.claim=setTimeout(resolveClaims, S.cfg.gracia*1000); }
       if(S.claim.list.some(x=>x.card===c && x.tipo===tipo)) return;
-      S.claim.list.push({pid, card:c, tipo});
+      // junto con el canto va dónde puso su maíz, para mostrar en la comprobación en qué se equivocó
+      const enCarton=new Set(cardNums(S.cards[c]));
+      const marks=(Array.isArray(a.marks)?a.marks:[]).map(Number).filter(n=>enCarton.has(n)).slice(0,15);
+      S.claim.list.push({pid, card:c, tipo, marks});
       sys(`📣 ${p.emoji} ${p.name} cantó ${tipo==='bingo'?'¡BINGO!':'¡LÍNEA!'} (cartón N° ${c})`);
       break; }
     case 'cerrar':
@@ -627,7 +657,6 @@ function leave(clear){
 let MARKS = load('lot_marks', {});
 const mkey = c => `${NET.code}:${S.round}:${c}`;
 function getMarks(c){
-  if(S.cfg.autoMark){ const g=new Set(cardNums(S.cards[c])); return new Set(S.drawn.filter(n=>g.has(n))); }
   return new Set(MARKS[mkey(c)]||[]);
 }
 function toggleMark(c, n){
@@ -642,10 +671,10 @@ function toggleMark(c, n){
 const me = () => S && P(NET.myPid);
 function cardHTML(c, o={}){
   const g=S.cards[c]; if(!g) return '';
-  const d = o.check ? new Set(S.drawn) : null, mk = o.mine ? getMarks(c) : null, own=P(S.owner[c]);
+  const d = o.check ? new Set(S.drawn) : null, mk = o.marks || (o.mine ? getMarks(c) : null), own=P(S.owner[c]);
   const rows = g.map((row,r)=>`<div class="r ${o.winRow===r?'win':''}">`+row.map(n=>{
     if(!n) return '<div class="cell e"></div>';
-    const cls=[mk&&mk.has(n)?'mk':'', d?(d.has(n)?'ok':'no'):''].join(' ');
+    const cls=[mk&&mk.has(n)?'mk':'', d?(d.has(n)?'ok':'no'):'', d&&mk&&mk.has(n)&&!d.has(n)?'mal':''].join(' ');
     return `<div class="cell ${cls}" data-n="${n}" style="--r:${(n*47)%70-35}deg">${n}</div>`;
   }).join('')+'</div>').join('');
   let acts='';
@@ -703,6 +732,7 @@ function menuHTML(){
       <button class="btn green" data-act="unirse">Entrar</button></div>
     </div>
     <div class="box"><button class="btn gray wide" data-act="reglas">📜 Cómo se juega (reglas)</button>
+      <button class="btn gold wide" style="margin-top:8px" data-act="sonido">🗣️ Elegir quién canta las bolillas</button>
       <div class="muted" style="margin-top:8px">¿Querés el Banquero? <a href="../">Jugá al Banquero Paraguayo</a></div></div>
     <div class="foot">Lotería Paraguaya · jleovgames</div></div>`;
 }
@@ -719,14 +749,12 @@ function cfgHTML(){
       <div><label>Premios</label><select data-cfg="modo" ${dis}><option value="linea" ${c.modo==='linea'?'selected':''}>Línea + Bingo (cartón lleno)</option><option value="bingo" ${c.modo==='bingo'?'selected':''}>Solo Bingo (cartón lleno)</option></select></div>
       ${c.modo==='linea'?num('pctLinea','% del pozo para la línea'):''}
       <div><label>Si alguien canta en falso</label><select data-cfg="falso" ${dis}>
-        <option value="anular" ${c.falso==='anular'?'selected':''}>Se le anula ese cartón</option>
-        <option value="multa" ${c.falso==='multa'?'selected':''}>Paga multa (2 cartones) al pozo</option>
-        <option value="nada" ${c.falso==='nada'?'selected':''}>Solo un aviso</option></select></div>
+        <option value="nada" ${c.falso==='nada'?'selected':''}>Saca su maíz equivocado y sigue jugando</option>
+        <option value="multa" ${c.falso==='multa'?'selected':''}>Paga multa (2 cartones) al pozo y sigue</option>
+        <option value="anular" ${c.falso==='anular'?'selected':''}>Se le anula ese cartón</option></select></div>
       ${num('gracia','Segundos para cantar juntos')}
     </div>
     ${chk('aTiempo','Hay que cantar antes de que salga la próxima bolilla (si no, se pierde)')}
-    ${chk('tablero','Mostrar el tablero con todas las bolillas que salieron')}
-    ${chk('autoMark','Marcado automático (para chicos o abuelos: el juego anota solo)')}
   </div>`;
 }
 function lobbyHTML(){
@@ -779,10 +807,14 @@ function juegoHTML(){
       <button class="btn gold wide big" style="margin-top:10px" data-act="sacar" ${S.claim||S.drawn.length>=90?'disabled':''}>🎱 Sacar bolilla</button>
       ${S.drawn.length>=90 && NET.myPid===S.hostPid?`<button class="btn red wide" style="margin-top:8px" data-act="cerrar" ${S.claim?'disabled':''}>Cerrar ronda (el pozo se acumula)</button>`:''}
     </div>`:''}
-  <div class="sec">${mine.length?`Tus cartones ${S.cfg.autoMark?'(se marcan solos)':'— tocá los números para anotarlos'}`:'Esta ronda estás mirando: no tenés cartones.'}</div>
+  <div class="sec">${mine.length?'Tus cartones — tocá un número para ponerle tu maíz 🌽 (tocalo otra vez para sacarlo)':'Esta ronda estás mirando: no tenés cartones.'}</div>
   <div class="cards">${mine.map(c=>cardHTML(c,{mine:true})).join('')}</div>
-  ${S.cfg.tablero?`<details class="tab" ${UI.boardOpen?'open':''} id="boardDet" style="margin-top:12px"><summary>🔢 Tablero de bolillas (${S.drawn.length})</summary>
-    <div class="board" style="margin-top:8px">${Array.from({length:90},(_,i)=>i+1).map(n=>`<div class="${d.has(n)?'on':''} ${n===last?'last':''}">${n}</div>`).join('')}</div></details>`:''}`;
+  <div class="cantadas">
+    <div class="sec">📋 Bolillas cantadas (${S.drawn.length}) — revisá si se te pasó alguna</div>
+    <div class="orden">${S.drawn.length?S.drawn.map((n,i)=>`<div class="${i===S.drawn.length-1?'late':''}" title="Salió en el lugar ${i+1}"><small>${i+1}</small>${ball(n,'sm')}</div>`).join(''):'<span class="muted" style="color:#ccc">Todavía no salió ninguna.</span>'}</div>
+    <div class="sec" style="font-size:14px">🔢 Tablero del 1 al 90</div>
+    <div class="board">${Array.from({length:90},(_,i)=>i+1).map(n=>`<div class="${d.has(n)?'on':''} ${n===last?'last late':''}">${n}</div>`).join('')}</div>
+  </div>`;
 }
 function finHTML(){
   const r=S.resumen||{}, host=NET.myPid===S.hostPid;
@@ -804,13 +836,14 @@ const REGLAS = `<h3>📜 Cómo se juega la Lotería</h3><ul class="rules">
   <li><b>Bolillero de 90.</b> Las bolillas van del 1 al 90. El <b>cantor</b> 🎤 las saca de a una y las canta en voz alta.</li>
   <li><b>El cartón</b> tiene 3 filas y 9 columnas, con 15 números: 5 por fila. La 1ª columna lleva del 1 al 9, la 2ª del 10 al 19… y la última del 80 al 90.</li>
   <li><b>Elegí tus cartones</b> antes de que empiece la ronda. Todo lo que se paga por los cartones forma el <b>pozo</b>.</li>
-  <li><b>Anotá vos mismo:</b> cuando sale un número que está en tu cartón, tocalo para marcarlo. Si no lo anotás, el juego no te avisa.</li>
+  <li><b>Poné tu maíz 🌽:</b> cuando sale un número que está en tu cartón, tocalo para ponerle un grano de maíz. Nadie lo pone por vos: si no estás atento, el juego no te avisa.</li>
+  <li><b>Bolillas cantadas:</b> abajo de tus cartones están todas las bolillas que salieron, en orden y en el tablero del 1 al 90, para revisar si se te pasó alguna.</li>
   <li><b>¡LÍNEA!</b> Cuando completás una fila entera (5 números) cantás línea y cobrás la parte del pozo de la línea. Hay una sola línea por ronda.</li>
   <li><b>¡BINGO!</b> Cuando completás los 15 números del cartón (cartón lleno) cantás bingo, ganás el pozo grande y termina la ronda.</li>
   <li><b>Se comprueba:</b> al cantar se frena el juego y se revisan los números de tu cartón contra las bolillas que salieron.</li>
   <li><b>Cantar a tiempo:</b> hay que cantar antes de que salga la próxima bolilla. Si se te pasa, perdés el derecho.</li>
   <li><b>Empate:</b> si dos o más cantan con la misma bolilla (dentro de unos segundos), el premio se reparte en partes iguales.</li>
-  <li><b>Cantar en falso</b> (sin tener línea o bingo) tiene castigo: según la sala, se anula ese cartón o se paga una multa.</li>
+  <li><b>Cantar en falso:</b> si cantaste y al verificar no vino algún número, se muestra en rojo cuál fue. Sacás tu maíz equivocado y la partida sigue. (El anfitrión puede elegir que además se pague multa o se anule el cartón.)</li>
   <li>Si nadie gana el bingo, el pozo queda <b>acumulado</b> para la ronda siguiente.</li>
   <li><b>Préstamos:</b> si te quedás sin plata, tocá tu saldo 💸 arriba para pedir prestado. Los demás te pueden prestar y después les devolvés cuando ganes.</li></ul>`;
 const pedidosAjenos = () => (S && S.pedidos || []).filter(x=>x.pid!==NET.myPid && P(x.pid));
@@ -837,6 +870,16 @@ function prestamosHTML(){
     <div class="muted" style="margin-top:8px">Los préstamos son de palabra entre jugadores: el que debe paga cuando puede. Desde ${gs(500)}, de a 500.</div>
     <button class="btn wide" style="margin-top:12px" data-act="prestClose">Cerrar</button></div>`;
 }
+function sonidoHTML(){
+  const act=cantorActual(), hay=window.speechSynthesis && speechSynthesis.getVoices().some(v=>/^es/i.test(v.lang));
+  return `<div class="box"><h3>🗣️ ¿Quién canta las bolillas?</h3>
+    <div class="muted" style="margin-bottom:8px">Tocá un cantor para elegirlo y escucharlo. Cada jugador elige el suyo en su celular.</div>
+    <div class="voces">${CANTORES.map(c=>`<button class="voz ${PREF.voz&&c.id===act.id?'on':''}" data-act="cantorSel" data-id="${c.id}"><b>${c.nombre}</b><span>${c.desc}</span></button>`).join('')}
+      <button class="voz ${!PREF.voz?'on':''}" data-act="sinVoz"><b>🤐 Sin voz</b><span>Solo se ve el número</span></button></div>
+    ${hay?'':'<div class="res tarde" style="margin-top:8px">Este dispositivo no tiene voces en español instaladas, así que el cantor no se va a escuchar.</div>'}
+    <label class="chk" style="display:flex;gap:8px;align-items:center;margin-top:12px;font-weight:700"><input type="checkbox" data-act="efectos" ${PREF.sound?'checked':''}> 🔔 Efectos de sonido (bolilla, maíz, aplausos)</label>
+    <button class="btn wide" style="margin-top:12px" data-act="sonidoClose">Listo</button></div>`;
+}
 // redibuja la ventana encima del juego sin perder lo que se estaba escribiendo
 function setOv(html){
   const ov=$('#ov'), keep={}, ae=document.activeElement, aid=ae&&ov.contains(ae)?ae.id:null;
@@ -848,6 +891,7 @@ function setOv(html){
 function renderOv(){
   const ov=$('#ov');
   if(UI.reglas){ ov.innerHTML=`<div class="box">${REGLAS}<button class="btn wide" data-act="ovClose">Entendido</button></div>`; ov.classList.add('on'); return; }
+  if(UI.sonido){ setOv(sonidoHTML()); return; }
   if(UI.prest && S && me() && !S.claim){ setOv(prestamosHTML()); return; }
   if(!S || S.phase==='lobby' || S.phase==='venta'){ closeOv(); return; }
   if(S.claim){
@@ -863,11 +907,24 @@ function renderOv(){
     const txt={ok:'✅ ¡Correcto!', falso:'❌ Cantó en falso', tarde:'⏰ Llegó tarde: ya había salido otra bolilla', cerrado:'La línea ya se había cantado'};
     ov.innerHTML=`<div class="box"><h3>🔎 Comprobación</h3>${S.result.items.map(i=>{ const p=P(i.pid);
       return `<div class="res ${i.res}"><div class="t">${p?esc(p.emoji+' '+p.name):''} · ${i.tipo==='bingo'?'BINGO':'LÍNEA'} · ${txt[i.res]}${i.premio?` — cobra ${gs(i.premio)}`:''}</div>
-        ${i.pena?`<div class="muted">${esc(i.pena)}</div>`:''}${cardHTML(i.card,{check:true, winRow:i.row})}</div>`; }).join('')}
+        ${i.res==='falso'?explicaFalso(i):''}
+        ${i.pena?`<div class="muted">${esc(i.pena)}</div>`:''}${cardHTML(i.card,{check:true, winRow:i.row, marks:new Set(i.marks||[])})}
+        ${i.res==='falso' && i.pid===NET.myPid && !S.anulados[i.card]?`<button class="btn gold wide" style="margin-top:8px" data-act="quitarMal" data-card="${i.card}">🌽 Quitar mi maíz equivocado y seguir</button>`:''}</div>`; }).join('')}
       <button class="btn wide" data-act="ovRes">Seguir jugando</button></div>`;
     ov.classList.add('on'); return;
   }
   closeOv();
+}
+// en un canto falso se muestra qué número no vino (como cuando se lee el cartón en voz alta)
+function explicaFalso(i){
+  const g=S.cards[i.card], d=new Set(S.drawn), marks=i.marks||[];
+  const mal=marks.filter(n=>!d.has(n)).sort((a,b)=>a-b);
+  let faltan;
+  if(i.tipo==='linea'){ const filas=g.map(r=>r.filter(n=>n && !d.has(n))); faltan=filas.sort((a,b)=>a.length-b.length)[0]; }
+  else faltan=cardNums(g).filter(n=>!d.has(n));
+  return `<div style="margin-bottom:6px">${mal.length?`🌽 Puso maíz en <b>${mal.join(', ')}</b> y ${mal.length>1?'esos números no salieron':'ese número no salió'}.<br>`:''}
+    ${faltan.length?`Le ${faltan.length>1?'faltan':'falta'} <b>${faltan.join(', ')}</b> para ${i.tipo==='linea'?'completar la línea':'llenar el cartón'}.`:''}
+    <div class="muted">Los números en rojo no salieron. La partida sigue.</div></div>`;
 }
 function closeOv(){ const ov=$('#ov'); ov.classList.remove('on'); ov.innerHTML=''; }
 function renderChat(){
@@ -889,9 +946,9 @@ function effects(){
     UI.ballAt=Date.now();
   } else {
     // si se redibuja mientras sale la bolilla, la animación sigue desde donde iba (y si ya terminó, no se repite)
-    const t=(Date.now()-(UI.ballAt||0))/1000, b=$('#bigBall'), num=$('#bigNum');
-    if(t>3){ if(b) b.classList.remove('spin'); if(num) num.classList.remove('late'); }
-    else { if(b) b.style.animationDelay=(1.5-t)+'s'; if(num) num.style.animationDelay=(1.9-t)+'s'; }
+    const t=(Date.now()-(UI.ballAt||0))/1000, b=$('#bigBall'), lates=document.querySelectorAll('#app .late');
+    if(t>3){ if(b) b.classList.remove('spin'); lates.forEach(e=>e.classList.remove('late')); }
+    else { if(b) b.style.animationDelay=(1.5-t)+'s'; lates.forEach(e=>e.style.animationDelay=(1.9-t)+'s'); }
   }
   UI.seenDrawn=S.drawn.length;
   if(S.claim && UI.seenClaim!==S.claim.until){ UI.seenClaim=S.claim.until; beep(990,.15,'square',.12); beep(990,.15,'square',.12,.2); if(navigator.vibrate) navigator.vibrate([80,60,80]); say('¡Cantaron!'); }
@@ -924,7 +981,7 @@ function saveName(){ const i=$('#myName'); if(i){ PREF.name=i.value.trim().slice
 function needName(){ saveName(); if(!PREF.name){ toast('Escribí tu nombre primero.'); $('#myName')&&$('#myName').focus(); return false; } return true; }
 document.addEventListener('click', e=>{
   const cell=e.target.closest('.carton.mine .cell[data-n]');
-  if(cell && S && S.phase==='juego' && !S.cfg.autoMark){
+  if(cell && S && S.phase==='juego'){
     const c=+cell.closest('.carton').dataset.card; if(S.anulados[c]) return;
     toggleMark(c, +cell.dataset.n);
     // cada cartón aparece también en la ventana de "¡Cantaron!": se actualizan todas las copias
@@ -956,15 +1013,19 @@ document.addEventListener('click', e=>{
     case 'pagar': case 'perdonar': doAct({t:a, id:el.dataset.id}); break;
     case 'ovClose': UI.reglas=false; renderOv(); break;
     case 'ovRes': UI.closedResult=S.result&&S.result.at; renderOv(); break;
-    case 'sonido': // voz + efectos → solo efectos → silencio
-      if(PREF.voz){ PREF.voz=false; PREF.sound=true; toast('🔊 Solo efectos (sin voz)'); }
-      else if(PREF.sound){ PREF.sound=false; toast('🔇 Silencio'); }
-      else { PREF.sound=true; PREF.voz=true; toast('🗣️ Voz que canta los números + efectos'); }
-      if(!PREF.voz && window.speechSynthesis) speechSynthesis.cancel(); savePref(); render(); break;
+    case 'sonido': UI.sonido=true; renderOv(); break;
+    case 'sonidoClose': UI.sonido=false; renderOv(); break;
+    case 'cantorSel': PREF.cantor=el.dataset.id; PREF.voz=true; savePref(); say(`${dicho(33)}... ¡El 33!`, true); renderOv(); $('#top').innerHTML=S?topHTML():''; break;
+    case 'sinVoz': PREF.voz=false; savePref(); if(window.speechSynthesis) speechSynthesis.cancel(); renderOv(); if(S) $('#top').innerHTML=topHTML(); break;
+    case 'efectos': PREF.sound=!PREF.sound; savePref(); beep(880,.1); renderOv(); if(S) $('#top').innerHTML=topHTML(); break;
     case 'chat': $('#chat').classList.toggle('on'); renderChat(); $('#top').innerHTML=topHTML(); if($('#chat').classList.contains('on')) $('#chatIn').focus(); break;
     case 'chatClose': $('#chat').classList.remove('on'); break;
     case 'comprar': case 'devolver': doAct({t:a, card:+el.dataset.card}); break;
-    case 'cantar': doAct({t:'cantar', card:+el.dataset.card, tipo:el.dataset.tipo}); break;
+    case 'cantar': { const c=+el.dataset.card; doAct({t:'cantar', card:c, tipo:el.dataset.tipo, marks:[...getMarks(c)]}); break; }
+    case 'quitarMal': { // saca los maíces puestos en números que no salieron
+      const c=+el.dataset.card, d=new Set(S.drawn), k=mkey(c);
+      MARKS[k]=(MARKS[k]||[]).filter(n=>d.has(n)); store('lot_marks', MARKS);
+      UI.closedResult=S.result&&S.result.at; toast('🌽 Listo: quitaste los maíces de números que no salieron.'); render(); break; }
     case 'quitar': { const q=P(el.dataset.pid); if(q && confirm(`¿Sacar a ${q.name} de la sala?`)) doAct({t:'quitar', pid:q.id}); break; }
     case 'recargar': doAct({t:'recargar', pid:el.dataset.pid}); break;
     default: doAct({t:a});
