@@ -811,7 +811,8 @@ function waitInfo(){
 function idleTarget(ignoreSnooze){   // jugador conectado que no responde hace rato (no bots ni el anfitrión)
   const w=waitInfo(); if(!w || !w.since) return null;
   const p=P(w.pid); if(!p || p.bot || p.bk || !p.conn || p.id===S.hostPid) return null;
-  const ms=Date.now()-w.since; if(ms<IDLE_MS) return null;
+  // si está negociando, pidiendo cambio o tocando la pantalla, cuenta como que responde
+  const ms=Date.now()-Math.max(w.since, p.activeAt||0); if(ms<IDLE_MS) return null;
   if(!ignoreSnooze && idleSnooze.pid===p.id && Date.now()<idleSnooze.until) return null;
   return {...w, p, ms};
 }
@@ -864,6 +865,13 @@ function act(pid, a){
   if(!S) return;
   const p=P(pid); if(!p) return 'Jugador desconocido.';
   if(a.type==='mic'){ p.mic=!!a.on; commit(); return; }
+  p.activeAt=Date.now();   // cualquier cosa que haga el jugador cuenta como actividad
+  if(a.type==='busy'){     // aviso del celular: está negociando, pidiendo cambio, contando billetes…
+    const what=BUSY_WHAT.includes(a.what) ? a.what : '';
+    const changed = p.busyWhat!==what; p.busyWhat=what; p.busyAt=Date.now();
+    if(changed) commit();  // solo se avisa a todos cuando cambia lo que está haciendo
+    return;
+  }
   if(S.phase==='play' && cur() && pid===cur().id) S.turnAt=Date.now();   // el del turno sigue activo
   if(S.phase==='lobby'){
     if(a.type==='addBot' && pid===S.hostPid){
@@ -1650,10 +1658,33 @@ function idleBoxHTML(){
     <button class="btn sm gray" onclick="idleSnooze={pid:'${it.p.id}',until:Date.now()+${IDLE_MS}};renderCenter();renderCardOverlay(true)">⏳ Seguir esperando</button>${skip}
     <button class="btn sm red" onclick="confirmKick('${it.p.id}')">🚪 Quitar jugador</button></div></div>`;
 }
+// el celular de cada jugador avisa cada tanto que la persona está ocupada (y en qué)
+const BUSY_WHAT=['negociando','pidiendo cambio al Banco','contando billetes','mirando sus títulos','mirando sus propiedades','jugando'];
+const BUSY_BY_MODAL={trade:'negociando', bank:'pidiendo cambio al Banco', rentpick:'contando billetes', titles:'mirando sus títulos', buy:'mirando sus títulos', props:'mirando sus propiedades', prop:'mirando sus títulos'};
+let lastTouch=0, lastBusySent=0, lastBusyWhat='';
+['pointerdown','keydown','input'].forEach(ev=>document.addEventListener(ev, ()=>{ lastTouch=Date.now(); sendBusy(); }, {passive:true}));
+function sendBusy(force){
+  if(NET.mode!=='client' || !S || S.phase!=='play' || !NET.myPid) return;
+  const me=P(NET.myPid); if(!me || me.bk) return;
+  const kind=$('#modalRoot').dataset.kind;
+  // una ventana abierta cuenta solo si tocó la pantalla en los últimos 3 minutos (si la dejó abierta y se fue, no)
+  const what = (BUSY_BY_MODAL[kind] && Date.now()-lastTouch<180000) ? BUSY_BY_MODAL[kind] : (Date.now()-lastTouch<20000 ? 'jugando' : '');
+  if(!what) return;
+  if(!force && what===lastBusyWhat && Date.now()-lastBusySent<10000) return;   // no saturar la conexión
+  lastBusyWhat=what; lastBusySent=Date.now();
+  if(NET.hostConn && NET.hostConn.open) NET.hostConn.send({t:'act', a:{type:'busy', what}});
+}
+setInterval(()=>sendBusy(true), 15000);   // con una ventana abierta (negociando, cambio, billetes) sigue avisando
+// qué está haciendo el jugador al que se espera (para mostrarlo en el tablero)
+function busyLine(){
+  const w=waitInfo(); if(!w) return '';
+  const p=P(w.pid); if(!p || p.bot || !p.busyWhat || p.busyWhat==='jugando' || Date.now()-(p.busyAt||0)>40000) return '';
+  return `<div class="muted">💬 ${esc(p.name)} está ${esc(p.busyWhat)}…</div>`;
+}
 function idleTargetView(){   // para los demás (no anfitrión): mismo cálculo, solo para mostrar el aviso
   const w=waitInfo(); if(!w || !w.since) return null;
   const p=P(w.pid); if(!p || p.bot || p.bk || !p.conn || p.id===S.hostPid || p.id===NET.myPid) return null;
-  const ms=Date.now()-w.since; return ms>=IDLE_MS ? {...w, p, ms} : null;
+  const ms=Date.now()-Math.max(w.since, p.activeAt||0); return ms>=IDLE_MS ? {...w, p, ms} : null;
 }
 let idleKeyShown='';
 setInterval(()=>{   // revisar cada 5 segundos si alguien se quedó colgado
@@ -1744,7 +1775,7 @@ function renderCenter(){
       else if(canAct(payer.id)){ h+=`<div class="muted">Esperando tu vuelto…</div>`; if(Date.now()-R.at>30000) acts.push(`<button class="btn gold" onclick="doAct({type:'rentChange',auto:true},'${payer.id}')">Pedir vuelto automático</button>`); }
       else h+=`<div class="muted">Está contando el vuelto…</div>`;
     }
-    h+=idleBoxHTML();
+    h+=busyLine()+idleBoxHTML();
     if(NET.mode==='host' && (!payer.conn || !owner.conn) && !(payer.bot||owner.bot))
       acts.push(`<button class="btn gray" onclick="doAct({type:'payForce'})">Resolver automático (${esc((!payer.conn?payer:owner).name)} se desconectó)</button>`);
     if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
@@ -1794,7 +1825,7 @@ function renderCenter(){
     }
   }
   if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
-  h+=idleBoxHTML();
+  h+=busyLine()+idleBoxHTML();
   if(NET.mode==='host'){   // aviso al anfitrión de quién se fue (si no es el del turno)
     const gone=S.players.filter(x=>!x.bot && !x.bk && !x.conn && x.id!==p.id);
     if(gone.length) h+=`<div class="gone">${gone.map(x=>`⚠️ ${esc(x.name)} se fue ${offAgo(x)} · <a href="#" onclick="showPlayer('${x.id}');return false">esperar o sacar</a>`).join('<br>')}</div>`;
