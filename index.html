@@ -128,6 +128,9 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .trades:empty{display:none}
 .gone{background:#fff4e5;border:1px solid #f0b46a;border-radius:8px;padding:.4em .7em;font-size:.85em}
 .gone a{color:var(--red);font-weight:700}
+.gone.idle{background:#fff1d6;border-color:#e9a23b;color:#3a2a00}
+.cardidle{margin-top:10px;pointer-events:auto;text-align:left;color:#222;font-size:13px}
+.cardidle .acts{justify-content:flex-start}
 .observer{background:#eef3ff;border:1px solid #9db4e8;border-radius:10px;padding:10px;font-size:13.5px;line-height:1.4}
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
@@ -647,7 +650,7 @@ function startGame(){
   const players = shuffle(S.players).map(p=>Object.assign(p,{money:START_MONEY,bills:billsOf(START_MONEY),pos:0,jail:false,jailT:0,jcards:[],bk:false,cred:null}));
   S = {phase:'play', players, seq:S.seq, hostPid:S.hostPid, props:{}, turn:0, tp:'roll', dbl:0, rolledDbl:false,
        roll:[1,1], rollId:0, card:null, cardId:0, pendingBuy:null, decks:{cc:shuffle(range(CARDS.cc.length)), ca:shuffle(range(CARDS.ca.length))},
-       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0, rolled:{}, observers:S.observers||[], ver:2};
+       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0, rolled:{}, observers:S.observers||[], ver:2, turnAt:Date.now()};
   log('¡Empieza la partida! El Banquero reparte a cada jugador '+fmt(START_MONEY)+': 10 billetes de ₲ 100.000, 6 de ₲ 50.000, 6 de ₲ 20.000, 5 de ₲ 10.000, 4 de ₲ 5.000, 4 de ₲ 2.000 y 2 monedas de ₲ 1.000.');
   log('Turno de '+cur().name+'.');
 }
@@ -794,8 +797,26 @@ function doRoll(p){
   else S.rolledDbl=false;
   move(p,sum);
 }
+// ¿a quién está esperando la partida y desde cuándo?
+const IDLE_MS = 60000;   // después de 1 minuto sin responder, el anfitrión puede actuar
+let idleSnooze={pid:null, until:0};   // "seguir esperando" (solo en el dispositivo del anfitrión)
+function waitInfo(){
+  if(!S || S.phase!=='play') return null;
+  if(S.card && S.card.open) return {pid:S.card.pid, since:S.card.at, what:'cerrar su tarjeta', kind:'turn'};
+  if(S.rent){ const R=S.rent, pid=R.stage==='pay'?R.from:R.to;
+    return {pid, since:R.at, what:R.stage==='pay'?'pagar':'dar el vuelto', kind:pid===cur().id?'turn':'pay'}; }
+  if(S.tp==='rent') return null;
+  return {pid:cur().id, since:S.turnAt||0, what:'jugar su turno', kind:'turn'};
+}
+function idleTarget(ignoreSnooze){   // jugador conectado que no responde hace rato (no bots ni el anfitrión)
+  const w=waitInfo(); if(!w || !w.since) return null;
+  const p=P(w.pid); if(!p || p.bot || p.bk || !p.conn || p.id===S.hostPid) return null;
+  const ms=Date.now()-w.since; if(ms<IDLE_MS) return null;
+  if(!ignoreSnooze && idleSnooze.pid===p.id && Date.now()<idleSnooze.until) return null;
+  return {...w, p, ms};
+}
 function nextTurn(){
-  S.dbl=0; S.rolledDbl=false; S.pendingBuy=null;
+  S.dbl=0; S.rolledDbl=false; S.pendingBuy=null; S.turnAt=Date.now();
   if(alive().length<=1) return;
   do{ S.turn=(S.turn+1)%S.players.length; }while(cur().bk);
   S.tp='roll';
@@ -843,6 +864,7 @@ function act(pid, a){
   if(!S) return;
   const p=P(pid); if(!p) return 'Jugador desconocido.';
   if(a.type==='mic'){ p.mic=!!a.on; commit(); return; }
+  if(S.phase==='play' && cur() && pid===cur().id) S.turnAt=Date.now();   // el del turno sigue activo
   if(S.phase==='lobby'){
     if(a.type==='addBot' && pid===S.hostPid){
       if(S.players.length>=6) return 'La sala está llena (6 jugadores).';
@@ -958,7 +980,8 @@ function act(pid, a){
     case 'kick': {   // el anfitrión saca de la partida a alguien que se desconectó
       const k=P(a.id);
       if(pid!==S.hostPid || !k || k.bot || k.bk) return;
-      if(k.conn) return 'Solo se puede sacar a alguien que está desconectado.';
+      const it=idleTarget(true);
+      if(k.conn && !(it && it.p.id===k.id)) return 'Solo se puede sacar a alguien desconectado o que no responde hace rato.';
       S.payQ=(S.payQ||[]).filter(q=>q.from!==k.id && q.to!==k.id);
       if(S.rent && (S.rent.from===k.id || S.rent.to===k.id)) autoRent();
       if(S.card && S.card.open && S.card.pid===k.id) S.card.open=false;
@@ -967,14 +990,20 @@ function act(pid, a){
     }
     case 'payForce':   // el anfitrión resuelve solo un pago trabado por alguien desconectado
       if(pid!==S.hostPid || !S.rent) return;
-      if(P(S.rent.from).conn && P(S.rent.to).conn) return;
+      { const it=idleTarget(true);
+        if(P(S.rent.from).conn && P(S.rent.to).conn && !(it && it.kind==='pay')) return;
+        if(it) log(`⏩ El anfitrión resolvió automático el pago de ${it.p.name} (no respondía).`); }
       autoRent(); break;
     case 'exchange':   // cambiar un billete en el Banco por otros más chicos
       if(!canExchange(pid)) return 'Podés pedir cambio al Banco solo en tu turno.';
       if(!exchangeBill(p, a.v, a.opt)) return 'Ese billete no se puede cambiar.';
       log(`🏦 ${p.name} cambia un billete de ${fmt(+a.v)} en el Banco por ${billText(CHANGE_OPTS[+a.v][a.opt|0])}.`); break;
-    case 'skipTurn':
-      if(pid!==S.hostPid || cur().conn) return; log(`${cur().name} no está conectado: se salta su turno.`);
+    case 'skipTurn': {
+      if(pid!==S.hostPid) return;
+      const it=idleTarget(true), idle = it && it.p.id===cur().id;
+      if(cur().conn && !idle) return;
+      log(idle ? `⏭ ${cur().name} no respondía: el anfitrión saltó su turno.` : `${cur().name} no está conectado: se salta su turno.`);
+    }
       if(S.card) S.card.open=false; drainPays(); nextTurn(); break;
     default: return;
   }
@@ -1607,6 +1636,33 @@ function showBank(refresh){
   modal(h,'bank');
 }
 
+// --- jugador que no responde: el anfitrión decide esperar, saltar o quitar ---
+const mins = ms => { const m=Math.floor(ms/60000); return m<1?'menos de 1 minuto':m===1?'1 minuto':m+' minutos'; };
+function idleBoxHTML(){
+  const it = NET.mode==='host' ? idleTarget() : (()=>{ const t=S&&idleTargetView(); return t; })();
+  if(!it) return '';
+  const name=esc(it.p.name);
+  if(NET.mode!=='host') return `<div class="gone">⏳ Hace ${mins(it.ms)} que esperamos a ${name} (${it.what}). El anfitrión puede saltarlo.</div>`;
+  const skip = it.kind==='pay'
+    ? `<button class="btn sm gold" onclick="doAct({type:'payForce'})">💵 Hacer su pago automático</button>`
+    : `<button class="btn sm gold" onclick="doAct({type:'skipTurn'})">⏭ Saltar su turno</button>`;
+  return `<div class="gone idle">⏳ <b>${name}</b> no responde hace ${mins(it.ms)} (tiene que ${it.what}).<div class="acts" style="margin-top:6px">
+    <button class="btn sm gray" onclick="idleSnooze={pid:'${it.p.id}',until:Date.now()+${IDLE_MS}};renderCenter();renderCardOverlay(true)">⏳ Seguir esperando</button>${skip}
+    <button class="btn sm red" onclick="confirmKick('${it.p.id}')">🚪 Quitar jugador</button></div></div>`;
+}
+function idleTargetView(){   // para los demás (no anfitrión): mismo cálculo, solo para mostrar el aviso
+  const w=waitInfo(); if(!w || !w.since) return null;
+  const p=P(w.pid); if(!p || p.bot || p.bk || !p.conn || p.id===S.hostPid || p.id===NET.myPid) return null;
+  const ms=Date.now()-w.since; return ms>=IDLE_MS ? {...w, p, ms} : null;
+}
+let idleKeyShown='';
+setInterval(()=>{   // revisar cada 5 segundos si alguien se quedó colgado
+  if(!S || S.phase!=='play' || NET.mode==='local' || !$('#center')) return;
+  const it = NET.mode==='host' ? idleTarget() : idleTargetView();
+  const key = it ? it.p.id+':'+it.what+':'+Math.floor(it.ms/60000) : '';
+  if(key!==idleKeyShown){ idleKeyShown=key; renderCenter(); renderCardOverlay(true); }
+}, 5000);
+
 // --- pagar con billetes y dar vuelto ---
 let openedRent=null, rentTimer=null, PICK={key:null, sel:{}, exch:false};
 function billChip(v, n, onclick, cls){
@@ -1688,6 +1744,7 @@ function renderCenter(){
       else if(canAct(payer.id)){ h+=`<div class="muted">Esperando tu vuelto…</div>`; if(Date.now()-R.at>30000) acts.push(`<button class="btn gold" onclick="doAct({type:'rentChange',auto:true},'${payer.id}')">Pedir vuelto automático</button>`); }
       else h+=`<div class="muted">Está contando el vuelto…</div>`;
     }
+    h+=idleBoxHTML();
     if(NET.mode==='host' && (!payer.conn || !owner.conn) && !(payer.bot||owner.bot))
       acts.push(`<button class="btn gray" onclick="doAct({type:'payForce'})">Resolver automático (${esc((!payer.conn?payer:owner).name)} se desconectó)</button>`);
     if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
@@ -1737,6 +1794,7 @@ function renderCenter(){
     }
   }
   if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
+  h+=idleBoxHTML();
   if(NET.mode==='host'){   // aviso al anfitrión de quién se fue (si no es el del turno)
     const gone=S.players.filter(x=>!x.bot && !x.bk && !x.conn && x.id!==p.id);
     if(gone.length) h+=`<div class="gone">${gone.map(x=>`⚠️ ${esc(x.name)} se fue ${offAgo(x)} · <a href="#" onclick="showPlayer('${x.id}');return false">esperar o sacar</a>`).join('<br>')}</div>`;
@@ -2033,7 +2091,8 @@ function renderCardOverlay(){
   if(!c || !c.open){ r.innerHTML=''; r.dataset.id=''; return; }
   const drawer=P(c.pid), mine=drawer && canAct(drawer.id);
   const hostCanClose = !mine && (NET.mode==='host' || NET.mode==='local') && drawer && (drawer.bot || !drawer.conn);
-  const key=c.id+':'+(mine||hostCanClose);
+  const idle = NET.mode!=='local' && !mine ? idleBoxHTML() : '';   // el que sacó la tarjeta no responde
+  const key=c.id+':'+(mine||hostCanClose)+':'+idle;
   if(r.dataset.id===key) return;
   const isNew = !r.dataset.id || !r.dataset.id.startsWith(c.id+':');
   r.dataset.id=key;
@@ -2041,7 +2100,7 @@ function renderCardOverlay(){
     <div>${mine?(NET.mode==='local'?esc(c.who)+', sacaste:':'Sacaste:'):esc(c.who)+' sacó:'}</div><p>${esc(c.x)}</p>
     ${mine||hostCanClose?`<button class="btn wide" style="background:#fff;color:#222;font-size:16px" onclick="doAct({type:'cardClose'},'${c.pid}')">${mine?'✔ Entendido, cerrar':drawer.bot?`✔ Ya la leímos, cerrar`:'Cerrar (jugador desconectado)'}</button>
            ${drawer.bot&&!mine?`<small>Es la tarjeta de un bot: cerrala cuando todos la hayan leído.</small>`:''}`
-          :`<small>⏳ Esperando que ${drawer&&drawer.bot?'el anfitrión cierre la tarjeta de '+esc(c.who):esc(c.who)+' la lea y la cierre'}…</small>`}</div></div>`;
+          :`<small>⏳ Esperando que ${drawer&&drawer.bot?'el anfitrión cierre la tarjeta de '+esc(c.who):esc(c.who)+' la lea y la cierre'}…</small>`}${idle?`<div class="cardidle">${idle}</div>`:''}</div></div>`;
   if(isNew) SFX.card();
 }
 function showRules(){
