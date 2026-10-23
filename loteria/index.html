@@ -101,7 +101,9 @@ input[type=text],input[type=number],select{width:100%;padding:9px 11px;border:1p
 .stage{display:flex;gap:16px;align-items:center;background:rgba(255,255,255,.08);border-radius:16px;padding:14px;color:#fff;margin-bottom:12px;flex-wrap:wrap}
 .stage .info{flex:1;min-width:180px}
 .stage .nick{font-size:18px;font-weight:700;color:var(--gold);min-height:22px}
-.prev{display:flex;gap:6px;margin-top:8px}
+.todas{flex-basis:100%;border-top:1px solid rgba(255,255,255,.15);padding-top:8px}
+.todas .tt{font-size:13px;font-weight:700;opacity:.85;margin-bottom:6px}
+.ball.xs{width:30px;height:30px;font-size:13px;box-shadow:inset -3px -4px 6px rgba(0,0,0,.35)}
 .pozo{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .pozo div{flex:1;min-width:140px;background:rgba(0,0,0,.35);color:#fff;border-radius:12px;padding:8px 12px}
 .pozo b{display:block;font-size:20px;color:var(--gold)}
@@ -116,8 +118,8 @@ input[type=text],input[type=number],select{width:100%;padding:9px 11px;border:1p
 .voz span{font-size:12px;color:var(--muted)}
 .voz.on{border-color:var(--green);background:#e4f7e7}
 .cantadas{background:rgba(255,255,255,.08);border-radius:14px;padding:4px 12px 12px;margin-top:14px}
-.orden{display:flex;flex-wrap:wrap;gap:6px}
-.orden>div{display:flex;flex-direction:column;align-items:center;color:rgba(255,255,255,.55);font-size:10px}
+.orden{display:flex;flex-wrap:wrap;gap:5px}
+.orden>div{display:flex;flex-direction:column;align-items:center;color:rgba(255,255,255,.55);font-size:9px;line-height:11px}
 .board div.late{animation:aparece .4s ease 1.9s both,pulse 1s 2.3s infinite alternate}
 .cell.mal{outline:3px solid #d00;outline-offset:-3px}
 details.tab{background:rgba(255,255,255,.08);border-radius:12px;padding:8px 12px;color:#fff;margin-bottom:12px}
@@ -806,14 +808,17 @@ function ventaHTML(){
 function juegoHTML(){
   const last=S.drawn[S.drawn.length-1], canDraw=NET.myPid===S.cantorPid||NET.myPid===S.hostPid, mine=myCards(NET.myPid);
   const cantor=P(S.cantorPid), d=new Set(S.drawn);
-  const prev=S.drawn.slice(-6,-1).reverse();
   const lw=S.winners.linea.map(w=>P(w.pid)).filter(Boolean).map(p=>p.emoji+' '+esc(p.name)).join(', ');
   return `<div class="stage">
     ${last?ball(last,'spin" id="bigBall'):`<div class="ball" style="background:#777"><span>?</span></div>`}
     <div class="info"><div style="font-size:14px;opacity:.8">${last?`Bolilla ${S.drawn.length} de 90`:'Todavía no salió ninguna bolilla'}</div>
       ${last?`<div class="nick">“${esc(dicho(last))}”</div>`:''}
       <div style="font-size:26px;font-weight:900" id="bigNum" class="late">${last?`¡El ${last}! <span style="font-size:16px;opacity:.8">(${enLetras(last)})</span>`:`🎤 ${cantor?esc(cantor.name):''} va a cantar`}</div>
-      <div class="prev">${prev.map(n=>ball(n,'sm')).join('')}</div></div>
+    </div>
+    <div class="todas">
+      <div class="tt">📋 Todas las bolillas cantadas (${S.drawn.length}) — la más nueva primero</div>
+      <div class="orden">${S.drawn.length?S.drawn.map((n,i)=>({n,i})).reverse().map(({n,i})=>`<div class="${i===S.drawn.length-1?'late':''}" title="Salió en el lugar ${i+1}">${ball(n,'xs')}<small>${i+1}ª</small></div>`).join(''):'<span style="opacity:.6">Todavía no salió ninguna.</span>'}</div>
+    </div>
   </div>
   <div class="pozo">
     ${S.cfg.modo==='linea'?`<div class="${S.stage!=='linea'?'won':''}">Línea<b>${gs(S.pozo.linea)}</b>${lw?`Ganó ${lw}`:'En juego'}</div>`:''}
@@ -827,9 +832,7 @@ function juegoHTML(){
   <div class="sec">${mine.length?'Tus cartones — tocá un número para ponerle tu maíz 🌽 (tocalo otra vez para sacarlo)':'Esta ronda estás mirando: no tenés cartones.'}</div>
   <div class="cards">${mine.map(c=>cardHTML(c,{mine:true})).join('')}</div>
   <div class="cantadas">
-    <div class="sec">📋 Bolillas cantadas (${S.drawn.length}) — revisá si se te pasó alguna</div>
-    <div class="orden">${S.drawn.length?S.drawn.map((n,i)=>`<div class="${i===S.drawn.length-1?'late':''}" title="Salió en el lugar ${i+1}"><small>${i+1}</small>${ball(n,'sm')}</div>`).join(''):'<span class="muted" style="color:#ccc">Todavía no salió ninguna.</span>'}</div>
-    <div class="sec" style="font-size:14px">🔢 Tablero del 1 al 90</div>
+    <div class="sec">🔢 Tablero del 1 al 90 — revisá si se te pasó alguna</div>
     <div class="board">${Array.from({length:90},(_,i)=>i+1).map(n=>`<div class="${d.has(n)?'on':''} ${n===last?'last late':''}">${n}</div>`).join('')}</div>
   </div>`;
 }
