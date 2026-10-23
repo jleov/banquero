@@ -159,7 +159,7 @@ const BALLC = ['#ef5350','#ffa726','#ffee58','#66bb6a','#26c6da','#42a5f5','#ab4
 const ballColor = n => BALLC[Math.min(8, Math.floor(n/10))];
 const APODOS = {15:'la niña bonita', 22:'los dos patitos', 33:'la edad de Cristo', 77:'las dos banderitas', 88:'las dos gorditas', 90:'el abuelo', 50:'medio siglo', 11:'las dos velitas'};
 const apodo = n => APODOS[n] || (n<10 ? 'solito' : '');
-const DEF_CFG = {precio:5000, saldo:100000, max:4, serie:36, modo:'linea', pctLinea:30, aTiempo:true, falso:'anular', gracia:4, autoMark:false, tablero:true};
+const DEF_CFG = {precio:500, saldo:10000, max:4, serie:36, modo:'linea', pctLinea:30, aTiempo:true, falso:'anular', gracia:4, autoMark:false, tablero:true};
 
 let S = null;   // estado del juego: el anfitrión es la autoridad, los demás reciben copias
 const NET = {mode:null, peer:null, conns:{}, hostConn:null, code:'', myPid:null, welcomed:false};
@@ -218,7 +218,7 @@ const myCards = pid => Object.keys(S.owner||{}).filter(c=>S.owner[c]===pid).map(
 function lobbyState(){
   return {phase:'lobby', round:0, players:[], hostPid:null, cantorPid:null, cfg:{...DEF_CFG}, cards:{}, owner:{}, anulados:{},
     drawn:[], stage:'linea', pozo:{linea:0,bingo:0}, acum:0, winners:{linea:[],bingo:[]}, claim:null, result:null, auto:0,
-    lastBallAt:0, resumen:null, chat:[], nextId:1};
+    lastBallAt:0, resumen:null, chat:[], deudas:[], pedidos:[], nextId:1};
 }
 const P = id => S && S.players.find(p=>p.id===id);
 function addPlayer(name, emoji, token, bot){
@@ -226,11 +226,12 @@ function addPlayer(name, emoji, token, bot){
   S.players.push(p); return p;
 }
 function sys(x){ S.chat.push({sys:true, x, at:Date.now()}); if(S.chat.length>120) S.chat.shift(); }
+const monto = v => { v=Math.floor((+v||0)/500)*500; return v>=500 && v<=1000000 ? v : 0; };
 const cleanName = s => String(s||'').replace(/\s+/g,' ').trim().slice(0,18) || 'Jugador';
 function sanitizeCfg(c){
   const n=(v,lo,hi,d)=>{ v=Math.round(+v); return isFinite(v) ? Math.max(lo,Math.min(hi,v)) : d; };
   return {
-    precio:n(c.precio,500,1000000,5000), saldo:n(c.saldo,0,100000000,100000), max:n(c.max,1,12,4), serie:n(c.serie,6,120,36),
+    precio:Math.round(n(c.precio,500,20000,500)/500)*500, saldo:+c.saldo===20000?20000:10000, max:n(c.max,1,12,4), serie:n(c.serie,6,120,36),
     modo:c.modo==='bingo'?'bingo':'linea', pctLinea:n(c.pctLinea,5,60,30), aTiempo:!!c.aTiempo,
     falso:['anular','multa','nada'].includes(c.falso)?c.falso:'anular', gracia:n(c.gracia,2,10,4), autoMark:!!c.autoMark, tablero:!!c.tablero
   };
@@ -269,6 +270,7 @@ function act(pid, a){
       const q=P(a.pid); if(!isHost || !q || q.id===S.hostPid || S.phase==='juego') return;
       myCards(q.id).forEach(c=>{ delete S.owner[c]; });
       S.players=S.players.filter(x=>x!==q); if(S.cantorPid===q.id) S.cantorPid=S.hostPid;
+      S.deudas=(S.deudas||[]).filter(d=>d.de!==q.id && d.a!==q.id); S.pedidos=(S.pedidos||[]).filter(x=>x.pid!==q.id);
       if(NET.conns[q.id]){ try{ NET.conns[q.id].send({t:'kicked'}); NET.conns[q.id].close(); }catch(e){} delete NET.conns[q.id]; }
       sys(`${q.emoji} ${q.name} salió de la sala.`);
       break; }
@@ -279,6 +281,41 @@ function act(pid, a){
     case 'recargar': {
       const q=P(a.pid); if(!isHost || !q || S.phase==='juego') return;
       q.saldo += S.cfg.saldo; sys(`💵 ${q.emoji} ${q.name} recibió ${gs(S.cfg.saldo)} de saldo.`);
+      break; }
+    /* ---------- préstamos entre jugadores ---------- */
+    case 'prestar': {
+      const q=P(a.to), m=monto(a.monto); S.deudas=S.deudas||[]; S.pedidos=S.pedidos||[];
+      if(!q || q.id===pid || q.bot) return;
+      if(!m) return 'El préstamo es desde Gs. 500, de a 500.';
+      if(p.saldo<m) return 'No te alcanza el saldo para prestar eso.';
+      p.saldo-=m; q.saldo+=m;
+      const d=S.deudas.find(d=>d.de===q.id && d.a===pid);
+      if(d) d.monto+=m; else S.deudas.push({id:'d'+(S.nextId++), de:q.id, a:pid, monto:m});
+      const ped=S.pedidos.find(x=>x.pid===q.id);
+      if(ped){ ped.monto-=m; if(ped.monto<=0) S.pedidos=S.pedidos.filter(x=>x!==ped); }
+      sys(`💸 ${p.emoji} ${p.name} le prestó ${gs(m)} a ${q.emoji} ${q.name}.`);
+      break; }
+    case 'pedir': {
+      const m=monto(a.monto); S.pedidos=(S.pedidos||[]).filter(x=>x.pid!==pid);
+      if(!m) return 'Pedí desde Gs. 500, de a 500.';
+      S.pedidos.push({id:'r'+(S.nextId++), pid, monto:m});
+      sys(`🙏 ${p.emoji} ${p.name} pide ${gs(m)} prestado. (Tocá 💸 arriba para prestarle)`);
+      botsLend();
+      break; }
+    case 'noPedir':
+      S.pedidos=(S.pedidos||[]).filter(x=>x.pid!==pid); break;
+    case 'pagar': {
+      const d=(S.deudas||[]).find(d=>d.id===a.id); if(!d || d.de!==pid) return;
+      const q=P(d.a), m=Math.min(d.monto, p.saldo);
+      if(m<=0) return 'No tenés saldo para pagar.';
+      p.saldo-=m; if(q) q.saldo+=m; d.monto-=m;
+      if(d.monto<=0) S.deudas=S.deudas.filter(x=>x!==d);
+      sys(`🤝 ${p.emoji} ${p.name} le devolvió ${gs(m)} a ${q?q.emoji+' '+q.name:'quien le prestó'}${d.monto>0?` (todavía debe ${gs(d.monto)})`:' y quedó a mano'}.`);
+      break; }
+    case 'perdonar': {
+      const d=(S.deudas||[]).find(d=>d.id===a.id); if(!d || d.a!==pid) return;
+      const q=P(d.de); S.deudas=S.deudas.filter(x=>x!==d);
+      sys(`😇 ${p.emoji} ${p.name} le perdonó la deuda de ${gs(d.monto)} a ${q?q.emoji+' '+q.name:'un jugador'}.`);
       break; }
     case 'abrir':
       if(!isHost || !['lobby','fin'].includes(S.phase)) return;
@@ -403,6 +440,14 @@ function botsBuy(){
   S.players.filter(p=>p.bot).forEach((b,i)=>{
     const n=1+randInt(3);
     for(let k=0;k<n;k++) setTimeout(()=>{ if(S && S.phase==='venta' && P(b.id) && NET.mode==='host') act(b.id,{t:'azar'}); }, 800+i*600+k*700+randInt(1200));
+  });
+}
+// los vecinos de la casa a veces prestan cuando alguien pide (si les sobra)
+function botsLend(){
+  (S.pedidos||[]).forEach(ped=>{
+    const b=S.players.filter(p=>p.bot && p.saldo>=ped.monto+S.cfg.precio*2).sort(()=>Math.random()-.5)[0];
+    if(!b || Math.random()<.35) return;
+    setTimeout(()=>{ if(S && NET.mode==='host' && P(b.id) && (S.pedidos||[]).some(x=>x.id===ped.id)) act(b.id,{t:'prestar', to:ped.pid, monto:ped.monto}); }, 2000+randInt(3000));
   });
 }
 function botsCheck(){
@@ -601,7 +646,7 @@ function topHTML(){
   const m=me(); const unread = UI.unread ? `<span class="dot">${UI.unread}</span>` : '';
   return `<span class="code" data-act="copiar" title="Copiar el enlace de la sala">🎟️ ${NET.code}</span>
     <span class="grow"></span>
-    ${m?`<span class="saldo">${m.emoji} ${gs(m.saldo)}</span>`:''}
+    ${m?`<button class="ib saldo" data-act="prestamos" title="Préstamos entre jugadores">💸 ${gs(m.saldo)}${pedidosAjenos().length?`<span class="dot">${pedidosAjenos().length}</span>`:''}</button>`:''}
     <button class="ib" data-act="reglas" title="Reglas">📜</button>
     <button class="ib" data-act="sonido" title="Sonido: voz que canta + efectos / solo efectos / silencio">${PREF.voz?'🗣️':PREF.sound?'🔊':'🔇'}</button>
     <button class="ib" data-act="chat" title="Chat">💬${unread}</button>
@@ -635,8 +680,8 @@ function cfgHTML(){
   const chk=(k,l)=>`<label class="chk"><input type="checkbox" data-cfg="${k}" ${c[k]?'checked':''} ${dis}> ${l}</label>`;
   return `<div class="box"><h3>⚙️ Reglas de esta sala ${host?'':'<span class="muted">(las decide el anfitrión)</span>'}</h3>
     <div class="cfg">
-      ${num('precio','Precio del cartón (Gs.)',500)}
-      ${num('saldo','Saldo para cada jugador (Gs.)',1000)}
+      ${num('precio','Precio del cartón (desde Gs. 500)',500)}
+      <div><label>Saldo para cada jugador</label><select data-cfg="saldo" ${dis}>${[10000,20000].map(v=>`<option value="${v}" ${c.saldo===v?'selected':''}>${gs(v)}</option>`).join('')}</select></div>
       ${num('max','Máximo de cartones por jugador')}
       ${num('serie','Cartones en venta por ronda')}
       <div><label>Premios</label><select data-cfg="modo" ${dis}><option value="linea" ${c.modo==='linea'?'selected':''}>Línea + Bingo (cartón lleno)</option><option value="bingo" ${c.modo==='bingo'?'selected':''}>Solo Bingo (cartón lleno)</option></select></div>
@@ -717,7 +762,7 @@ function finHTML(){
     ${(r.bingo||[]).map(w=>win(w,'🏆 Bingo')).join('')}
     ${!(r.bingo||[]).length?`<div class="res tarde"><div class="t">Nadie cantó bingo a tiempo. Pozo acumulado para la próxima: ${gs(S.acum)}</div></div>`:''}
     <h3 style="margin-top:14px">💰 Saldos</h3>
-    <table class="rank">${rank.map((p,i)=>`<tr><td>${i+1}.</td><td>${esc(p.emoji+' '+p.name)}</td><td style="text-align:right"><b>${gs(p.saldo)}</b></td>
+    <table class="rank">${rank.map((p,i)=>`<tr><td>${i+1}.</td><td>${esc(p.emoji+' '+p.name)}${(S.deudas||[]).filter(d=>d.de===p.id).map(d=>`<div class="muted">debe ${gs(d.monto)} a ${esc((P(d.a)||{}).name||'—')}</div>`).join('')}</td><td style="text-align:right"><b>${gs(p.saldo)}</b></td>
       <td style="text-align:right">${host&&p.saldo<S.cfg.precio?`<button class="btn sm" data-act="recargar" data-pid="${p.id}">Recargar</button>`:''}</td></tr>`).join('')}</table>
     ${host?`<div class="flex" style="margin-top:14px"><button class="btn gray" data-act="lobby">⚙️ Cambiar reglas</button><button class="btn green big grow" data-act="abrir">🎟️ Nueva ronda</button></div>`
       :'<div class="muted" style="margin-top:10px">Esperando que el anfitrión empiece otra ronda…</div>'}
@@ -734,10 +779,44 @@ const REGLAS = `<h3>📜 Cómo se juega la Lotería</h3><ul class="rules">
   <li><b>Cantar a tiempo:</b> hay que cantar antes de que salga la próxima bolilla. Si se te pasa, perdés el derecho.</li>
   <li><b>Empate:</b> si dos o más cantan con la misma bolilla (dentro de unos segundos), el premio se reparte en partes iguales.</li>
   <li><b>Cantar en falso</b> (sin tener línea o bingo) tiene castigo: según la sala, se anula ese cartón o se paga una multa.</li>
-  <li>Si nadie gana el bingo, el pozo queda <b>acumulado</b> para la ronda siguiente.</li></ul>`;
+  <li>Si nadie gana el bingo, el pozo queda <b>acumulado</b> para la ronda siguiente.</li>
+  <li><b>Préstamos:</b> si te quedás sin plata, tocá tu saldo 💸 arriba para pedir prestado. Los demás te pueden prestar y después les devolvés cuando ganes.</li></ul>`;
+const pedidosAjenos = () => (S && S.pedidos || []).filter(x=>x.pid!==NET.myPid && P(x.pid));
+function prestamosHTML(){
+  const m=me(), otros=S.players.filter(p=>p.id!==NET.myPid && !p.bot), deudas=S.deudas||[];
+  const mio=(S.pedidos||[]).find(x=>x.pid===NET.myPid);
+  const nom = id => { const p=P(id); return p ? esc(p.emoji+' '+p.name) : '—'; };
+  const debo=deudas.filter(d=>d.de===NET.myPid), meDeben=deudas.filter(d=>d.a===NET.myPid), resto=deudas.filter(d=>d.de!==NET.myPid && d.a!==NET.myPid);
+  return `<div class="box"><h3>💸 Préstamos · tu saldo ${gs(m.saldo)}</h3>
+    ${pedidosAjenos().length?`<div class="res tarde"><div class="t">🙏 Piden plata prestada</div>${pedidosAjenos().map(x=>`<div class="flex" style="margin-top:4px"><span class="grow">${nom(x.pid)} pide <b>${gs(x.monto)}</b></span>
+      <button class="btn sm green" data-act="prestarPedido" data-pid="${x.pid}" data-monto="${x.monto}" ${m.saldo<x.monto?'disabled':''}>Prestarle ${gs(x.monto)}</button></div>`).join('')}</div>`:''}
+    ${debo.length?`<div class="res falso"><div class="t">Lo que debés</div>${debo.map(d=>`<div class="flex" style="margin-top:4px"><span class="grow">Le debés <b>${gs(d.monto)}</b> a ${nom(d.a)}</span>
+      <button class="btn sm" data-act="pagar" data-id="${d.id}" ${m.saldo<500?'disabled':''}>${m.saldo>=d.monto?'Pagar todo':'Pagar lo que tengo'}</button></div>`).join('')}</div>`:''}
+    ${meDeben.length?`<div class="res ok"><div class="t">Lo que te deben</div>${meDeben.map(d=>`<div class="flex" style="margin-top:4px"><span class="grow">${nom(d.de)} te debe <b>${gs(d.monto)}</b></span>
+      <button class="btn sm gray" data-act="perdonar" data-id="${d.id}">Perdonar</button></div>`).join('')}</div>`:''}
+    <label>Prestarle a</label>
+    ${otros.length?`<div class="flex"><select id="prestTo" class="grow" style="flex:2">${otros.map(p=>`<option value="${p.id}">${esc(p.emoji+' '+p.name)}</option>`).join('')}</select>
+      <input type="number" id="prestMonto" step="500" min="500" value="1000" style="flex:1;min-width:90px"><button class="btn green" data-act="prestar">Prestar</button></div>`
+      :'<div class="muted">No hay otros jugadores a quien prestarle.</div>'}
+    <label>Pedir prestado</label>
+    ${mio?`<div class="flex"><span class="grow">Estás pidiendo <b>${gs(mio.monto)}</b>. Esperá que alguien te preste.</span><button class="btn sm gray" data-act="noPedir">Ya no</button></div>`
+      :`<div class="flex"><input type="number" id="pedirMonto" step="500" min="500" value="1000" class="grow"><button class="btn gold" data-act="pedir">🙏 Pedir</button></div>`}
+    ${resto.length?`<div class="muted" style="margin-top:10px">Otras deudas en la sala: ${resto.map(d=>`${nom(d.de)} le debe ${gs(d.monto)} a ${nom(d.a)}`).join(' · ')}</div>`:''}
+    <div class="muted" style="margin-top:8px">Los préstamos son de palabra entre jugadores: el que debe paga cuando puede. Desde ${gs(500)}, de a 500.</div>
+    <button class="btn wide" style="margin-top:12px" data-act="prestClose">Cerrar</button></div>`;
+}
+// redibuja la ventana encima del juego sin perder lo que se estaba escribiendo
+function setOv(html){
+  const ov=$('#ov'), keep={}, ae=document.activeElement, aid=ae&&ov.contains(ae)?ae.id:null;
+  ov.querySelectorAll('input[id],select[id]').forEach(e=>keep[e.id]=e.value);
+  ov.innerHTML=html; ov.classList.add('on');
+  for(const id in keep){ const e=document.getElementById(id); if(e && [...e.options||[{value:keep[id]}]].some(o=>o.value===keep[id])) e.value=keep[id]; }
+  if(aid){ const e=document.getElementById(aid); if(e) e.focus(); }
+}
 function renderOv(){
   const ov=$('#ov');
   if(UI.reglas){ ov.innerHTML=`<div class="box">${REGLAS}<button class="btn wide" data-act="ovClose">Entendido</button></div>`; ov.classList.add('on'); return; }
+  if(UI.prest && S && me() && !S.claim){ setOv(prestamosHTML()); return; }
   if(!S || S.phase==='lobby' || S.phase==='venta'){ closeOv(); return; }
   if(S.claim){
     const left=Math.max(0, Math.ceil((S.claim.until-Date.now())/1000));
@@ -826,6 +905,12 @@ document.addEventListener('click', e=>{
     case 'copiar': { const link=location.origin+location.pathname+'?sala='+NET.code;
       (navigator.clipboard?navigator.clipboard.writeText(link):Promise.reject()).then(()=>toast('Enlace copiado: '+link)).catch(()=>toast('Código de la sala: '+NET.code)); break; }
     case 'reglas': UI.reglas=true; renderOv(); break;
+    case 'prestamos': UI.prest=true; renderOv(); break;
+    case 'prestClose': UI.prest=false; renderOv(); break;
+    case 'prestar': doAct({t:'prestar', to:$('#prestTo').value, monto:$('#prestMonto').value}); break;
+    case 'prestarPedido': doAct({t:'prestar', to:el.dataset.pid, monto:+el.dataset.monto}); break;
+    case 'pedir': doAct({t:'pedir', monto:$('#pedirMonto').value}); break;
+    case 'pagar': case 'perdonar': doAct({t:a, id:el.dataset.id}); break;
     case 'ovClose': UI.reglas=false; renderOv(); break;
     case 'ovRes': UI.closedResult=S.result&&S.result.at; renderOv(); break;
     case 'sonido': // voz + efectos → solo efectos → silencio
