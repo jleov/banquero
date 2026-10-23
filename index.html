@@ -369,7 +369,7 @@ body.spy #voiceBar, body.spy .tabs [data-tab=chat], body.spy #feedChat, body.spy
     </div>
   </div>
 </div>
-<div id="spyBar">🕵️ Mirando la sala <b id="spyCode"></b> sin que te vean <button class="btn sm" onclick="ownerSpyExit()">Volver al panel</button></div>
+<div id="spyBar">🕵️ Mirando <b id="spyCode"></b> sin que te vean <button class="btn sm" onclick="ownerSpyExit()">Volver al panel</button></div>
 
 <!-- ============ SALA ============ -->
 <div class="screen" id="lobby">
@@ -1247,7 +1247,7 @@ function commit(){
     sendBackups(); ownerReport();
     if(!NET.noSave) store('bnq_host',{code:NET.code, S, CHAT:CHAT.slice(-80), myPid:NET.myPid, at:Date.now()});
   } else if(NET.mode==='local'){
-    store('bnq_local',{S, at:Date.now()});
+    store('bnq_local',{S, at:Date.now()}); ownerReport();
   }
   render();
 }
@@ -1293,35 +1293,45 @@ async function ownerKeyFromPassword(pw){
 const OWNER={conn:null, ok:false, watch:false, lastSeen:0, tried:0, nonce:null};
 function ownerDrop(){ const c=OWNER.conn; Object.assign(OWNER,{conn:null, ok:false, watch:false}); try{ c && c.close(); }catch(e){} }
 function ownerLinkTick(){
-  if(NET.mode!=='host' || !OWNER_PUB || !NET.peer || !NET.peer.open){ if(OWNER.conn) ownerDrop(); return; }
+  // las partidas en un solo dispositivo (contra bots o pasando el celular) no tienen sala: usan una conexión aparte solo para el panel
+  if(NET.mode!=='local' && OWNER.peer){ try{ OWNER.peer.destroy(); }catch(e){} OWNER.peer=null; }
+  if(NET.mode==='local' && S && OWNER_PUB && (!OWNER.peer || OWNER.peer.destroyed)){
+    const lp=OWNER.peer=newPeer();
+    lp.on('error', ()=>{}); lp.on('disconnected', ()=>{ if(!lp.destroyed) setTimeout(()=>{ try{ lp.reconnect(); }catch(e){} },1500); });
+  }
+  const peer = NET.mode==='host' ? NET.peer : NET.mode==='local' ? OWNER.peer : null;
+  if(!OWNER_PUB || !peer || !peer.open){ if(OWNER.conn) ownerDrop(); return; }
   const c=OWNER.conn;
   if(c && c.open && Date.now()-OWNER.lastSeen<20000) return;   // conectado y el panel da señales
   if(c && !c.open && Date.now()-OWNER.tried<10000) return;      // todavía conectando
   ownerDrop();
-  const n=NET.peer.connect(OWNER_ID, {reliable:true});
+  const n=peer.connect(OWNER_ID, {reliable:true});
   Object.assign(OWNER,{conn:n, tried:Date.now(), lastSeen:Date.now()});
   n.on('open', ()=>{ OWNER.nonce=b64u(crypto.getRandomValues(new Uint8Array(18))); n.send({t:'hi', nonce:OWNER.nonce}); });
   n.on('data', async d=>{
     if(OWNER.conn!==n || !d || typeof d!=='object') return;
     OWNER.lastSeen=Date.now();
     if(d.t==='proof'){ if(await ownerVerify(OWNER.nonce, d.sig)){ OWNER.ok=true; ownerReport(); } else ownerDrop(); return; }
-    if(!OWNER.ok || NET.mode!=='host') return;
+    if(!OWNER.ok || (NET.mode!=='host' && NET.mode!=='local')) return;
     if(d.t==='watch'){ OWNER.watch=!!d.on; ownerReport(); }
-    else if(d.t==='iam'){ S.ownerTok=[...new Set([...(S.ownerTok||[]), String(d.token)])].slice(-4); commit(); try{ n.send({t:'iamOk', code:NET.code}); }catch(e){} }
+    else if(d.t==='iam' && NET.mode==='host'){ S.ownerTok=[...new Set([...(S.ownerTok||[]), String(d.token)])].slice(-4); commit(); try{ n.send({t:'iamOk', code:NET.code}); }catch(e){} }
     else if(d.t==='ping'){ try{ n.send({t:'pong'}); }catch(e){} }
   });
   n.on('close', ()=>{ if(OWNER.conn===n) Object.assign(OWNER,{conn:null, ok:false, watch:false}); });
 }
 setInterval(ownerLinkTick, 4000);
 function ownerReport(){
-  const c=OWNER.conn; if(!OWNER.ok || !c || !c.open || !S || NET.mode!=='host') return;
+  const c=OWNER.conn; if(!OWNER.ok || !c || !c.open || !S || (NET.mode!=='host' && NET.mode!=='local')) return;
+  const local=NET.mode==='local';
+  if(local && !S.localCode) S.localCode=genCode();   // código interno, solo para el panel
+  const code=local ? S.localCode : NET.code;
   let turn=null; try{ if(S.phase==='play') turn=cur().name; }catch(e){}
-  const info={phase:S.phase, host:(P(S.hostPid)||{}).name||'', turn, started:S.startedAt||null,
+  const info={phase:S.phase, local, host:(P(S.hostPid)||{}).name||'', turn, started:S.startedAt||null,
     players:S.players.map(p=>({n:p.name, e:p.emoji, bot:!!p.bot, conn:!!p.conn, bk:!!p.bk})),
     obs:(S.observers||[]).filter(o=>o.conn).map(o=>({n:o.name, owner:!!o.owner}))};
   try{
-    c.send({t:'room', code:NET.code, info});
-    if(OWNER.watch) c.send({t:'spy', code:NET.code, s:publicState(null)});   // el tablero, sin la plata secreta ni el chat
+    c.send({t:'room', code, info});
+    if(OWNER.watch){ const s=publicState(null); if(local) s.players.forEach(p=>p.conn=true); c.send({t:'spy', code, s}); }   // el tablero, sin la plata secreta ni el chat
   }catch(e){}
 }
 
@@ -1401,16 +1411,17 @@ function renderOwner(){
   const rooms=Object.entries(ADMIN.rooms).filter(([c,r])=>r.info).sort((a,b)=>(a[1].info.phase==='play'?0:1)-(b[1].info.phase==='play'?0:1));
   const phase={lobby:'⏳ En la sala de espera', play:'🎲 Jugando', over:'🏁 Terminada'};
   el.innerHTML = (ADMIN.err?`<p class="observer">${esc(ADMIN.err)} ${ADMIN.peer?'':'<button class="btn sm" onclick="ownerRetry()">🔄 Reintentar</button>'}</p>`:'')
-    + `<p class="muted" style="margin-top:0">Salas abiertas ahora: <b>${rooms.length}</b>. Las salas aparecen solas mientras este panel está abierto (tardan unos segundos).</p>`
+    + `<p class="muted" style="margin-top:0">Partidas abiertas ahora: <b>${rooms.length}</b>. Aparecen solas (en línea y en un solo dispositivo) mientras este panel está abierto (tardan unos segundos).</p>`
     + (rooms.length ? rooms.map(([code,r])=>{ const i=r.info;
         return `<div class="observer" style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:18px;letter-spacing:2px">${code}</b><span class="muted">${phase[i.phase]||i.phase}${i.started?' · '+ago(i.started):''}</span></div>
-          <div style="margin:6px 0">${i.players.map(p=>`<span style="white-space:nowrap;${p.bk?'opacity:.5;text-decoration:line-through':''}">${p.e} ${p.bot?'🤖':''}${esc(p.n)}${p.n===i.host?' 👑':''}${!p.bot&&!p.conn?' ⚠️':''}</span>`).join(' · ')}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">${i.local?'<b>📱 Partida en un solo dispositivo</b>':`<b style="font-size:18px;letter-spacing:2px">${code}</b>`}<span class="muted">${phase[i.phase]||i.phase}${i.started?' · '+ago(i.started):''}</span></div>
+          <div style="margin:6px 0">${i.players.map(p=>`<span style="white-space:nowrap;${p.bk?'opacity:.5;text-decoration:line-through':''}">${p.e} ${p.bot?'🤖':''}${esc(p.n)}${!i.local&&p.n===i.host?' 👑':''}${!i.local&&!p.bot&&!p.conn?' ⚠️':''}</span>`).join(' · ')}</div>
           ${i.turn?`<div class="muted">Turno de <b>${esc(i.turn)}</b></div>`:''}
           ${i.obs.length?`<div class="muted">👀 Mirando: ${i.obs.map(o=>(o.owner?'👑 ':'')+esc(o.n)).join(', ')}</div>`:''}
           <div class="row" style="margin-top:8px">
             <button class="btn sm gray" onclick="ownerSpy('${code}')">🕵️ Mirar sin que me vean</button>
-            <button class="btn sm green" onclick="ownerJoin('${code}')">👑 Entrar a la vista</button></div></div>`; }).join('')
+            ${i.local?'':`<button class="btn sm green" onclick="ownerJoin('${code}')">👑 Entrar a la vista</button>`}</div>
+          ${i.local?'<div class="muted" style="margin-top:4px">Se juega en un solo celular o PC (contra bots o pasándose el aparato): no tiene sala, así que solo se puede mirar.</div>':''}</div>`; }).join('')
       : `<p style="text-align:center;font-size:40px;margin:10px 0">🛋️</p><p class="muted" style="text-align:center">No hay salas abiertas en este momento.</p>`)
     + `<button class="btn gray wide" style="margin-top:6px" onclick="ownerLogout()">🔒 Cerrar sesión de dueño en este dispositivo</button>`;
 }
@@ -1418,9 +1429,10 @@ function renderOwner(){
 function ownerSpy(code){
   const r=ADMIN.rooms[code]; if(!r || !r.conn.open) return toast('Esa sala ya no responde.');
   ADMIN.watching=code; NET.mode='spy'; NET.code=code; NET.myPid=null; NET.obs=null; S=null; CHAT=[]; renderChat();
-  document.body.classList.add('spy'); $('#spyCode').textContent=code;
+  const i=r.info||{};
+  document.body.classList.add('spy'); $('#spyCode').textContent = i.local ? 'la partida de '+((i.players||[]).find(p=>!p.bot)||{n:'un dispositivo'}).n : 'la sala '+code;
   document.querySelector('.tabs [data-tab=log]').click();
-  r.conn.send({t:'watch', on:true}); toast('🕵️ Mirando la sala '+code+' sin que nadie lo sepa.');
+  r.conn.send({t:'watch', on:true}); toast('🕵️ Mirando '+$('#spyCode').textContent+' sin que nadie lo sepa.');
 }
 function ownerSpyExit(){
   const r=ADMIN.rooms[ADMIN.watching]; try{ r && r.conn.send({t:'watch', on:false}); }catch(e){}
