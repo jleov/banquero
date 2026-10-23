@@ -180,8 +180,13 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
       <div class="row"><input type="text" id="joinCode" maxlength="5" placeholder="CÓDIGO" style="text-transform:uppercase;letter-spacing:3px;font-weight:800"><button class="btn red" id="btnJoin" style="flex:0 0 auto">Unirse</button></div>
     </div>
     <div class="box">
+      <h3>🤖 Practicar contra bots</h3>
+      <p class="muted">Jugá vos contra 3 bots para probar el juego.</p>
+      <button class="btn green wide" id="btnVsBots">Jugar contra bots</button>
+    </div>
+    <div class="box">
       <h3>📱 Jugar en este dispositivo</h3>
-      <p class="muted">Pasen el celular o la PC de mano en mano (2 a 6 jugadores).</p>
+      <p class="muted">Pasen el celular o la PC de mano en mano (2 a 6 jugadores). Tocá 👤/🤖 para que un lugar lo juegue un bot.</p>
       <div id="localNames"></div>
       <div class="row" style="margin-top:8px"><button class="btn gray" id="btnAddLocal">+ Jugador</button><button class="btn gold" id="btnLocal">Empezar</button></div>
     </div>
@@ -202,6 +207,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
     <div class="box">
       <h3>Jugadores (<span id="lobbyCount">0</span>/6)</h3>
       <ul class="plist" id="lobbyPlayers"></ul>
+      <button class="btn gray wide" id="btnAddBot" style="margin-bottom:8px">🤖 Agregar un bot</button>
       <button class="btn red wide" id="btnStart">🎲 Empezar partida</button>
       <p class="muted" id="lobbyWait" style="text-align:center"></p>
     </div>
@@ -368,8 +374,15 @@ const countType = (pid,t) => B.filter((s,i)=>s.t===t && S.props[i] && S.props[i]
 const groupClear = g => groupIdx(g).every(j=>!S.props[j] || S.props[j].h===0);
 const mortValue = i => B[i].p*K/2;
 const unmortCost = i => Math.round(B[i].p*K/2*1.1);
-const meId = () => NET.mode==='local' ? (S && S.players.length ? cur().id : null) : NET.myPid;
-const canAct = pid => NET.mode==='local' || pid===NET.myPid;
+// en modo local "yo" es el jugador del turno; si le toca a un bot, el primer humano
+const meId = () => {
+  if(NET.mode!=='local') return NET.myPid;
+  if(!S || !S.players.length) return null;
+  if(!cur().bot) return cur().id;
+  const h=S.players.find(p=>!p.bot && !p.bk) || S.players.find(p=>!p.bot);
+  return h ? h.id : null;
+};
+const canAct = pid => { const p=S&&S.players.find(x=>x.id===pid); if(p&&p.bot) return false; return NET.mode==='local' || pid===NET.myPid; };
 
 function log(m){ S.log.push({i:++S.logSeq, m}); if(S.log.length>80) S.log.shift(); }
 
@@ -400,12 +413,18 @@ function rentOf(i,dice,mode){
 
 /* ====================== MOTOR (sólo anfitrión) ====================== */
 function lobbyState(){ return {phase:'lobby', players:[], seq:0, hostPid:null, log:[], logSeq:0}; }
-function addPlayer(name, emoji, token, peerId){
+function addPlayer(name, emoji, token, peerId, bot){
   const usedE=S.players.map(p=>p.emoji), usedC=S.players.map(p=>p.color);
   if(!EMOJIS.includes(emoji) || usedE.includes(emoji)) emoji=EMOJIS.find(e=>!usedE.includes(e));
   const p={id:'p'+(++S.seq), name:(String(name||'').trim()||'Jugador').slice(0,16), emoji, color:COLORS.find(c=>!usedC.includes(c)),
-    token, peerId, conn:true, mic:false, money:START_MONEY, pos:0, jail:false, jailT:0, jcards:[], bk:false, cred:null};
+    token, peerId, conn:true, mic:false, money:START_MONEY, pos:0, jail:false, jailT:0, jcards:[], bk:false, cred:null, bot:!!bot};
   S.players.push(p); return p;
+}
+const BOT_NAMES=['Don Ramón','Ña Chela','Karai Pepe','Doña Toti','Tío Cachi','Ña Mari'];
+function addBot(){
+  const used=S.players.map(p=>p.name);
+  const name=BOT_NAMES.find(n=>!used.includes(n)) || 'Bot '+(S.seq+1);
+  return addPlayer(name, null, 'bot'+(S.seq+1), null, true);
 }
 function startGame(){
   const players = shuffle(S.players).map(p=>Object.assign(p,{money:START_MONEY,pos:0,jail:false,jailT:0,jcards:[],bk:false,cred:null}));
@@ -550,6 +569,13 @@ function act(pid, a){
   const p=P(pid); if(!p) return 'Jugador desconocido.';
   if(a.type==='mic'){ p.mic=!!a.on; commit(); return; }
   if(S.phase==='lobby'){
+    if(a.type==='addBot' && pid===S.hostPid){
+      if(S.players.length>=6) return 'La sala está llena (6 jugadores).';
+      const b=addBot(); sysChat(`🤖 ${b.name} se sumó como bot.`); commit(); return;
+    }
+    if(a.type==='removeBot' && pid===S.hostPid){
+      const b=P(a.id); if(b && b.bot){ S.players=S.players.filter(x=>x!==b); commit(); } return;
+    }
     if(a.type==='start' && pid===S.hostPid){
       if(S.players.length<2) return 'Se necesitan al menos 2 jugadores.';
       startGame(); commit();
@@ -612,6 +638,66 @@ function act(pid, a){
   }
   checkWinner(); commit();
 }
+
+/* ====================== BOTS (los maneja el anfitrión) ====================== */
+const BOT_RESERVE = 150*K;   // plata que el bot trata de guardar para alquileres
+function botTradeValue(bot, t){
+  // cuánto gana el bot con la oferta (positivo = le conviene)
+  const gives = t.to===bot.id ? {m:t.rm, ps:t.rp} : {m:t.gm, ps:t.gp};
+  const gets  = t.to===bot.id ? {m:t.gm, ps:t.gp} : {m:t.rm, ps:t.rp};
+  const other = t.to===bot.id ? t.from : t.to;
+  const worth = (i, owner) => {
+    const sp=B[i]; let v=sp.p*K;
+    if(sp.g){ const g=groupIdx(sp.g); const has=g.filter(j=>S.props[j]&&S.props[j].o===owner).length; if(has+1===g.length) v*=2.5; }
+    return v;
+  };
+  let gain = gets.m + gets.ps.reduce((a,i)=>a+worth(i,bot.id),0);
+  let loss = gives.m + gives.ps.reduce((a,i)=>a+worth(i,other),0);
+  return gain - loss*1.25;
+}
+function botChat(p, x){ pushChat({n:p.name, e:p.emoji, c:p.color, x}); }
+function botTick(){
+  if(!S || S.phase!=='play' || (NET.mode!=='host' && NET.mode!=='local')) return;
+  // responder ofertas dirigidas a bots
+  for(const t of S.trades){
+    const b=P(t.to); if(!b || !b.bot) continue;
+    if(!t.seen){ t.seen=Date.now(); continue; }
+    if(Date.now()-t.seen<1500) continue;
+    if(!validTrade(t) && botTradeValue(b,t)>0){ botChat(b,'¡Trato hecho! 🤝'); act(b.id,{type:'tradeAccept',id:t.id}); }
+    else { botChat(b,'Mmm… no me conviene.'); act(b.id,{type:'tradeReject',id:t.id}); }
+    return;
+  }
+  const p=cur(); if(!p.bot || p.bk) return;
+  if(Date.now()<rollingUntil) return;
+  if(p.money<0){   // conseguir plata: vender casas, después hipotecar, si no, quiebra
+    const mine=ownedList(p.id);
+    const s=mine.find(i=>canSell(p.id,i)); if(s!=null) return act(p.id,{type:'sell',i:s});
+    const m=mine.find(i=>canMort(p.id,i)); if(m!=null) return act(p.id,{type:'mort',i:m});
+    botChat(p,'Me fundí… ¡suerte a todos! 💸'); return act(p.id,{type:'bankrupt'});
+  }
+  if(S.tp==='roll'){
+    if(p.jail){
+      if(p.jcards.length) return act(p.id,{type:'jailCard'});
+      if(p.money>=JAIL_FINE+BOT_RESERVE*2 && Object.keys(S.props).length<20) return act(p.id,{type:'jailPay'});
+    }
+    return act(p.id,{type:'roll'});
+  }
+  if(S.tp==='buy'){
+    const sp=B[S.pendingBuy], price=sp.p*K;
+    const completes = sp.g && groupIdx(sp.g).every(j=>j===S.pendingBuy || (S.props[j]&&S.props[j].o===p.id));
+    const buy = p.money>=price && (p.money-price>=BOT_RESERVE || completes);
+    return act(p.id,{type:buy?'buy':'skip'});
+  }
+  if(S.tp==='end'){
+    const mine=ownedList(p.id);
+    const um=mine.find(i=>S.props[i].m && p.money-unmortCost(i)>=BOT_RESERVE*3);
+    if(um!=null) return act(p.id,{type:'unmort',i:um});
+    const bl=mine.filter(i=>canBuild(p.id,i) && p.money-GROUPS[B[i].g].h*K>=BOT_RESERVE).sort((a,b)=>S.props[a].h-S.props[b].h);
+    if(bl.length) return act(p.id,{type:'build',i:bl[0]});
+    return act(p.id,{type:'end'});
+  }
+}
+setInterval(botTick, 1100);
 
 /* ====================== RED (PeerJS / WebRTC) ====================== */
 function publicState(){ const s=JSON.parse(JSON.stringify(S)); s.players.forEach(p=>delete p.token); return s; }
@@ -823,8 +909,10 @@ function placeComm(sel){ const c=$('#comm'), t=$(sel); if(c.parentElement!==t) t
 function renderLobby(){
   $('#lobbyCode').textContent=NET.code||'';
   $('#lobbyCount').textContent=S.players.length;
-  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}</li>`).join('');
   const isHost = NET.mode==='host';
+  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}${p.bot&&isHost?`<button class="btn sm gray" onclick="doAct({type:'removeBot',id:'${p.id}'})">✕</button>`:''}</li>`).join('');
+  $('#btnAddBot').style.display = isHost ? 'block' : 'none';
+  $('#btnAddBot').disabled = S.players.length>=6;
   $('#btnStart').style.display = isHost ? 'block' : 'none';
   $('#btnStart').disabled = S.players.length<2;
   $('#lobbyWait').textContent = isHost ? (S.players.length<2?'Se necesitan al menos 2 jugadores.':'') : 'Esperando que el anfitrión empiece la partida…';
@@ -959,6 +1047,7 @@ function renderCenter(){
     else w='Está terminando su turno…';
     if(p.money<0) w='Tiene saldo negativo y debe conseguir dinero…';
     if(!p.conn) w='⚠️ Se desconectó.';
+    if(p.bot) w='🤖 '+w;
     h+=`<div>${w}</div>`;
     if(!p.conn && NET.mode==='host') acts.push(`<button class="btn gray" onclick="doAct({type:'skipTurn'})">Saltar su turno</button>`);
   }
@@ -972,7 +1061,7 @@ function renderPlayers(){
     const n=Object.values(S.props).filter(o=>o.o===p.id).length;
     return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
-      <span class="nm2">${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?' · en quiebra':''}</span></span>
+      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?' · en quiebra':''}</span></span>
       <span class="mo ${p.money<0?'neg':''}">${fmt(p.money)}</span></div>`;
   }).join('');
 }
@@ -984,7 +1073,7 @@ function tradeDesc(t){
 function renderTrades(){
   const mine=S.trades.filter(t=>NET.mode==='local' || t.to===NET.myPid || t.from===NET.myPid);
   $('#trades').innerHTML=mine.map(t=>{
-    const incoming = NET.mode==='local' || t.to===NET.myPid;
+    const incoming = !P(t.to).bot && (NET.mode==='local' || t.to===NET.myPid);
     return `<div class="trade">🤝 Oferta de ${esc(P(t.from).name)} a ${esc(P(t.to).name)}<br>${tradeDesc(t)}<div class="row" style="margin-top:6px">
       ${incoming?`<button class="btn sm green" onclick="doAct({type:'tradeAccept',id:${t.id}},'${t.to}')">Aceptar</button><button class="btn sm red" onclick="doAct({type:'tradeReject',id:${t.id}},'${t.to}')">Rechazar</button>`
                 :`<span class="muted">Esperando respuesta…</span><button class="btn sm gray" onclick="doAct({type:'tradeReject',id:${t.id}})">Cancelar</button>`}</div></div>`;
@@ -1142,15 +1231,28 @@ function leaveToMenu(){
 }
 
 /* ====================== MENÚ ====================== */
-const localNames=[];
+const localNames=[];   // {n: nombre, bot: true/false}
 function renderLocalNames(){
-  $('#localNames').innerHTML=localNames.map((n,k)=>`<div class="row" style="margin-top:6px"><span style="flex:0 0 auto;font-size:22px">${EMOJIS[k]}</span><input type="text" maxlength="16" value="${esc(n)}" oninput="localNames[${k}]=this.value">${localNames.length>2?`<button class="btn sm gray" style="flex:0 0 auto" onclick="localNames.splice(${k},1);renderLocalNames()">✕</button>`:''}</div>`).join('');
+  $('#localNames').innerHTML=localNames.map((p,k)=>`<div class="row" style="margin-top:6px"><span style="flex:0 0 auto;font-size:22px">${EMOJIS[k]}</span>
+    <input type="text" maxlength="16" value="${esc(p.n)}" oninput="localNames[${k}].n=this.value">
+    <button class="btn sm ${p.bot?'':'gray'}" style="flex:0 0 auto" title="Persona o bot" onclick="toggleLocalBot(${k})">${p.bot?'🤖 Bot':'👤 Persona'}</button>
+    ${localNames.length>2?`<button class="btn sm gray" style="flex:0 0 auto" onclick="localNames.splice(${k},1);renderLocalNames()">✕</button>`:''}</div>`).join('');
+}
+function toggleLocalBot(k){
+  const p=localNames[k]; p.bot=!p.bot;
+  if(p.bot && /^Jugador \d+$/.test(p.n)) p.n=BOT_NAMES.find(n=>!localNames.some(x=>x.n===n)) || p.n;
+  else if(!p.bot && BOT_NAMES.includes(p.n)) p.n='Jugador '+(k+1);
+  renderLocalNames();
 }
 function startLocal(){
   NET.mode='local'; S=lobbyState();
-  localNames.forEach((n,k)=>addPlayer(n||('Jugador '+(k+1)), EMOJIS[k], 'local'+k, null));
+  localNames.forEach((p,k)=>addPlayer(p.n||('Jugador '+(k+1)), EMOJIS[k], 'local'+k, null, p.bot));
   S.hostPid=S.players[0].id;
   startGame(); CHAT=[]; renderChat(); commit();
+}
+function startVsBots(){
+  localNames.splice(0, localNames.length, {n:myName(), bot:false}, {n:BOT_NAMES[0],bot:true}, {n:BOT_NAMES[1],bot:true}, {n:BOT_NAMES[2],bot:true});
+  renderLocalNames(); startLocal();
 }
 function refreshResume(){
   const h=load('bnq_host');
@@ -1162,8 +1264,9 @@ function refreshResume(){
 $('#myName').value = load('bnq_name') || '';
 $('#myName').oninput = e=>store('bnq_name', e.target.value);
 renderTokenPicker();
-localNames.push('Jugador 1','Jugador 2'); renderLocalNames();
-$('#btnAddLocal').onclick=()=>{ if(localNames.length<6){ localNames.push('Jugador '+(localNames.length+1)); renderLocalNames(); } };
+localNames.push({n:'Jugador 1',bot:false},{n:'Jugador 2',bot:false}); renderLocalNames();
+$('#btnAddLocal').onclick=()=>{ if(localNames.length<6){ localNames.push({n:'Jugador '+(localNames.length+1),bot:false}); renderLocalNames(); } };
+$('#btnVsBots').onclick=startVsBots;
 $('#btnLocal').onclick=startLocal;
 $('#btnHost').onclick=()=>{ if(!$('#myName').value.trim()) return toast('Escribí tu nombre primero.'); hostStart(false); };
 $('#btnResume').onclick=()=>hostStart(true);
@@ -1174,6 +1277,7 @@ $('#btnJoin').onclick=()=>{
   clientJoin(code);
 };
 $('#btnStart').onclick=()=>doAct({type:'start'});
+$('#btnAddBot').onclick=()=>doAct({type:'addBot'});
 const shareUrl=()=>location.origin+location.pathname+'#'+NET.code;
 $('#btnCopy').onclick=()=>{ navigator.clipboard.writeText(shareUrl()).then(()=>toast('Enlace copiado.'),()=>toast(shareUrl())); };
 $('#btnShare').onclick=()=>{
