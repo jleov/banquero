@@ -124,6 +124,8 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tools{display:flex;flex-wrap:wrap;gap:6px}
 .tools .btn{flex:1 1 auto}
 .trades:empty{display:none}
+.gone{background:#fff4e5;border:1px solid #f0b46a;border-radius:8px;padding:.4em .7em;font-size:.85em}
+.gone a{color:var(--red);font-weight:700}
 .observer{background:#eef3ff;border:1px solid #9db4e8;border-radius:10px;padding:10px;font-size:13.5px;line-height:1.4}
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
@@ -870,8 +872,11 @@ function act(pid, a){
       const t={id:++S.tradeSeq, from:pid, to:a.to, gm:Math.round(+a.gm||0), rm:Math.round(+a.rm||0),
                gp:(a.gp||[]).map(Number), rp:(a.rp||[]).map(Number), gc:Math.max(0,a.gc|0), rc:Math.max(0,a.rc|0)};
       const err=validTrade(t, true); if(err) return err;
+      // contraoferta: reemplaza la oferta que me hicieron
+      const old = a.replaces!=null ? S.trades.find(x=>x.id===+a.replaces && x.to===pid && x.from===t.to) : null;
+      if(old){ S.trades=S.trades.filter(x=>x!==old); t.counterOf=old.id; }
       if(S.trades.filter(x=>x.from===pid).length>=3) return 'Tenés demasiadas ofertas pendientes.';
-      S.trades.push(t); log(`🤝 ${p.name} le hace una oferta a ${P(t.to).name}.`); break;
+      S.trades.push(t); log(old ? `🔁 ${p.name} le hace una contraoferta a ${P(t.to).name}.` : `🤝 ${p.name} le hace una oferta a ${P(t.to).name}.`); break;
     }
     case 'tradeAccept': {
       const t=S.trades.find(x=>x.id===a.id); if(!t||t.to!==pid) return;
@@ -922,6 +927,16 @@ function act(pid, a){
       S.card.open=false;
       if(!S.rent && S.payQ && S.payQ.length) startNextPay();   // pagos de la tarjeta: empiezan al cerrarla
       break;
+    case 'kick': {   // el anfitrión saca de la partida a alguien que se desconectó
+      const k=P(a.id);
+      if(pid!==S.hostPid || !k || k.bot || k.bk) return;
+      if(k.conn) return 'Solo se puede sacar a alguien que está desconectado.';
+      S.payQ=(S.payQ||[]).filter(q=>q.from!==k.id && q.to!==k.id);
+      if(S.rent && (S.rent.from===k.id || S.rent.to===k.id)) autoRent();
+      if(S.card && S.card.open && S.card.pid===k.id) S.card.open=false;
+      goBankrupt(k, true); k.kicked=true;
+      log(`🚪 El anfitrión sacó a ${k.name} de la partida (se había ido).`); break;
+    }
     case 'payForce':   // el anfitrión resuelve solo un pago trabado por alguien desconectado
       if(pid!==S.hostPid || !S.rent) return;
       if(P(S.rent.from).conn && P(S.rent.to).conn) return;
@@ -963,7 +978,15 @@ function botTick(){
     const b=P(t.to); if(!b || !b.bot) continue;
     if(!t.seen){ t.seen=Date.now(); continue; }
     if(Date.now()-t.seen<1500) continue;
-    if(!validTrade(t) && botTradeValue(b,t)>0){ botChat(b,'¡Trato hecho! 🤝'); act(b.id,{type:'tradeAccept',id:t.id}); }
+    const val=botTradeValue(b,t), valid=!validTrade(t);
+    if(valid && val>0){ botChat(b,'¡Trato hecho! 🤝'); act(b.id,{type:'tradeAccept',id:t.id}); }
+    else if(valid && !t.counterOf && -val<=3000*K){
+      // contraoferta: lo mismo, pero pidiendo un poco más de plata (una sola vez por negocio)
+      const extra=Math.ceil((-val+1)/(100*K))*100*K;
+      const r=act(b.id,{type:'trade', to:t.from, gm:t.rm, gp:t.rp, gc:t.rc||0, rm:t.gm+extra, rp:t.gp, rc:t.gc||0, replaces:t.id});
+      if(typeof r==='string'){ botChat(b,'Mmm… no me conviene.'); act(b.id,{type:'tradeReject',id:t.id}); }
+      else botChat(b,`Así no me conviene… te hago una contraoferta: agregá ${fmt(extra)} 🔁`);
+    }
     else { botChat(b,'Mmm… no me conviene.'); act(b.id,{type:'tradeReject',id:t.id}); }
     return;
   }
@@ -1092,7 +1115,7 @@ function hostOnData(conn, d){
       sysChat(`${p.emoji} ${p.name} se reconectó.`);
     }
     if(NET.conns[p.id] && NET.conns[p.id]!==conn) try{ NET.conns[p.id].close(); }catch(e){}
-    conn.pid=p.id; NET.conns[p.id]=conn; p.conn=true; p.peerId=conn.peer; p.mic=false;
+    conn.pid=p.id; NET.conns[p.id]=conn; p.conn=true; p.peerId=conn.peer; p.mic=false; delete p.offAt;
     conn.send({t:'welcome', pid:p.id, code:NET.code});
     conn.send({t:'chatlog', list:CHAT.slice(-80)});
     commit(); return;
@@ -1106,7 +1129,7 @@ function hostOnClose(conn){
   delete NET.conns[pid];
   const p=P(pid); if(!p) return;
   if(S.phase==='lobby'){ S.players=S.players.filter(x=>x!==p); sysChat(`${p.name} salió de la sala.`); }
-  else { p.conn=false; p.mic=false; sysChat(`${p.emoji} ${p.name} se desconectó.`); }
+  else { p.conn=false; p.mic=false; p.offAt=Date.now(); sysChat(`${p.emoji} ${p.name} se desconectó.${p.bk?'':' El anfitrión puede esperarlo o sacarlo de la partida.'}`); }
   commit();
 }
 function addChat(pid, text){
@@ -1634,9 +1657,17 @@ function renderCenter(){
     if(!p.conn) w='⚠️ Se desconectó.';
     if(p.bot) w='🤖 '+w;
     h+=`<div>${w}</div>`;
-    if(!p.conn && NET.mode==='host') acts.push(`<button class="btn gray" onclick="doAct({type:'skipTurn'})">Saltar su turno</button>`);
+    if(!p.conn && NET.mode==='host'){
+      h+=`<div class="muted">Se fue ${offAgo(p)}. Podés esperarlo (no hace falta tocar nada), saltar su turno o sacarlo de la partida.</div>`;
+      acts.push(`<button class="btn gray" onclick="doAct({type:'skipTurn'})">⏭ Saltar su turno</button>`,
+                `<button class="btn red" onclick="confirmKick('${p.id}')">🚪 Sacarlo de la partida</button>`);
+    }
   }
   if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
+  if(NET.mode==='host'){   // aviso al anfitrión de quién se fue (si no es el del turno)
+    const gone=S.players.filter(x=>!x.bot && !x.bk && !x.conn && x.id!==p.id);
+    if(gone.length) h+=`<div class="gone">${gone.map(x=>`⚠️ ${esc(x.name)} se fue ${offAgo(x)} · <a href="#" onclick="showPlayer('${x.id}');return false">esperar o sacar</a>`).join('<br>')}</div>`;
+  }
   h+=`<div class="clog">${S.log.slice(-3).map(l=>`<div>${esc(l.m)}</div>`).join('')}</div>`;
   c.innerHTML=h;
 }
@@ -1650,7 +1681,7 @@ function renderWallet(){
   const pid=meId(), p=pid&&P(pid); const w=$('#wallet');
   if(p && p.bk && S.phase==='play'){   // quebró o se retiró: sigue mirando como observador
     w.style.display='block';
-    w.innerHTML=`<div class="observer">👀 <b>Estás mirando como observador.</b><br>${p.retired?'Te retiraste de la partida':'Quedaste en bancarrota'}: ya no jugás, pero podés seguir viendo el tablero y usar el chat.
+    w.innerHTML=`<div class="observer">👀 <b>Estás mirando como observador.</b><br>${p.kicked?'El anfitrión te sacó de la partida porque te habías ido':p.retired?'Te retiraste de la partida':'Quedaste en bancarrota'}: ya no jugás, pero podés seguir viendo el tablero y usar el chat.
       <button class="btn sm gray wide" style="margin-top:8px" onclick="confirmLeave()">🏠 Salir al inicio</button></div>`;
     return;
   }
@@ -1667,7 +1698,7 @@ function renderPlayers(){
     const n=Object.values(S.props).filter(o=>o.o===p.id).length;
     return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" data-pid="${p.id}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
-      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
+      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.kicked?' · 🚪 lo sacaron':p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${!p.bk&&!p.conn&&!p.bot&&NET.mode!=='local'?' '+offAgo(p):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
       <span class="mo ${isNeg(p)?'neg':''}">${moneyText(p)}</span></div>`;
   }).join('');
   // cartelito +/− cuando cambia la plata
@@ -1692,8 +1723,8 @@ function renderTrades(){
   const mine=S.trades.filter(t=>NET.mode==='local' || t.to===NET.myPid || t.from===NET.myPid);
   $('#trades').innerHTML=mine.map(t=>{
     const incoming = !P(t.to).bot && (NET.mode==='local' || t.to===NET.myPid);
-    return `<div class="trade">🤝 Oferta de ${esc(P(t.from).name)} a ${esc(P(t.to).name)}<br>${tradeDesc(t)}<div class="row" style="margin-top:6px">
-      ${incoming?`<button class="btn sm green" onclick="doAct({type:'tradeAccept',id:${t.id}},'${t.to}')">Aceptar</button><button class="btn sm red" onclick="doAct({type:'tradeReject',id:${t.id}},'${t.to}')">Rechazar</button>`
+    return `<div class="trade">${t.counterOf?'🔁 Contraoferta':'🤝 Oferta'} de ${esc(P(t.from).name)} a ${esc(P(t.to).name)}<br>${tradeDesc(t)}<div class="row" style="margin-top:6px">
+      ${incoming?`<button class="btn sm green" onclick="doAct({type:'tradeAccept',id:${t.id}},'${t.to}')">Aceptar</button><button class="btn sm gold" onclick="counterTrade(${t.id})">🔁 Contraoferta</button><button class="btn sm red" onclick="doAct({type:'tradeReject',id:${t.id}},'${t.to}')">Rechazar</button>`
                 :`<span class="muted">Esperando respuesta…</span><button class="btn sm gray" onclick="doAct({type:'tradeReject',id:${t.id}})">Cancelar</button>`}</div></div>`;
   }).join('');
 }
@@ -1860,33 +1891,57 @@ function showPlayer(pid){
   let h=`<h3>${p.emoji} ${esc(p.name)}</h3><p>Dinero: <b>${moneyText(p)}</b>${p.jcards.length?' · 🎫 Salga libre':''}</p>${seesMoney(p)?walletHTML(p):'<p class="muted">🔒 Su dinero es secreto: solo se sabe si no puede pagar.</p>'}<h4 style="margin:14px 0 4px">Propiedades</h4>`;
   h+=list.length?list.map(i=>`<div class="prow"><span class="sw" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span><span class="pn">${B[i].ic||''} ${B[i].n}</span><span class="muted">${S.props[i].m?'Hipotecada':S.props[i].h===5?'Hotel':S.props[i].h?S.props[i].h+' casa(s)':''}</span></div>`).join(''):'<p class="muted">Sin propiedades.</p>';
   if(!p.bk && S.phase==='play') h+=`<button class="btn gold wide" style="margin-top:8px" onclick="showTrade('${pid}')">🤝 Negociar con ${esc(p.name)}</button>`;
+  if(NET.mode==='host' && S.phase==='play' && !p.bk && !p.bot && !p.conn)
+    h+=`<div class="observer" style="margin-top:12px">⚠️ <b>${esc(p.name)} se fue ${offAgo(p)}.</b><br>Podés esperarlo a que vuelva o sacarlo de la partida.
+      <div class="row" style="margin-top:8px"><button class="btn gray" onclick="closeModal()">⏳ Esperarlo</button><button class="btn red" onclick="confirmKick('${p.id}')">🚪 Sacarlo</button></div></div>`;
   modal(h,'player');
 }
-function showTrade(target){
+function offAgo(p){
+  if(!p.offAt) return 'hace un rato';
+  const m=Math.floor((Date.now()-p.offAt)/60000);
+  return m<1 ? 'hace menos de un minuto' : m===1 ? 'hace 1 minuto' : `hace ${m} minutos`;
+}
+function confirmKick(id){
+  const p=P(id);
+  modal(`<h3>🚪 ¿Sacar a ${esc(p.name)} de la partida?</h3>
+    <ul style="font-size:14px;line-height:1.5"><li>Se lo declara en bancarrota: sus propiedades, casas y dinero vuelven al Banco.</li><li>La partida sigue sin esperarlo.</li><li>Si vuelve, puede entrar a mirar como observador 👀, pero ya no juega.</li></ul>
+    <div class="row"><button class="btn gray" onclick="closeModal()">⏳ Mejor lo espero</button><button class="btn red" onclick="closeModal();doAct({type:'kick',id:'${id}'})">🚪 Sí, sacarlo</button></div>`,'kick');
+}
+// ctx: {from, replaces, prefill} — para contraofertas: quién la hace, qué oferta reemplaza y con qué arranca
+let TRADE_CTX={};
+function showTrade(target, ctx){
   if(!S || S.phase!=='play') return;
-  const me=meId(), others=alive().filter(p=>p.id!==me);
+  TRADE_CTX = ctx || {};
+  const me=TRADE_CTX.from || meId(), others=alive().filter(p=>p.id!==me);
   if(P(me).bk) return toast('Estás en quiebra.');
   if(!others.length) return;
   target = target || others[0].id;
-  const T=P(target);
-  const chk=(pid,cls)=>(P(pid).jcards.map(()=>`<label class="chk"><input type="checkbox" class="${cls}C">🎫 Salga libre de Tacumbú</label>`).join('') +
-    ownedList(pid).filter(tradable).map(i=>`<label class="chk"><input type="checkbox" class="${cls}" value="${i}"><span class="dot" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span>${B[i].s||B[i].n}${S.props[i].m?' (hip.)':''}</label>`).join(''))||'<p class="muted">Nada para ofrecer</p>';
-  const h=`<h3>🤝 Negociar</h3>
+  const T=P(target), pf=TRADE_CTX.prefill||{gp:[],rp:[],gc:0,rc:0};
+  const chk=(pid,cls,selP,selC)=>(P(pid).jcards.map((_,k)=>`<label class="chk"><input type="checkbox" class="${cls}C" ${k<selC?'checked':''}>🎫 Salga libre de Tacumbú</label>`).join('') +
+    ownedList(pid).filter(tradable).map(i=>`<label class="chk"><input type="checkbox" class="${cls}" value="${i}" ${selP.includes(i)?'checked':''}><span class="dot" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span>${B[i].s||B[i].n}${S.props[i].m?' (hip.)':''}</label>`).join(''))||'<p class="muted">Nada para ofrecer</p>';
+  const counter=!!TRADE_CTX.replaces;
+  const h=`<h3>${counter?'🔁 Contraoferta':'🤝 Negociar'}</h3>
+    ${counter?`<p class="muted" style="margin-top:0">Cambiá lo que quieras de la oferta de ${esc(T.name)} y mandásela de vuelta. Su oferta original se reemplaza por la tuya.</p>`:''}
     <label style="font-size:13px;font-weight:700">Con:</label>
-    <select id="trTo" onchange="showTrade(this.value)">${others.map(p=>`<option value="${p.id}" ${p.id===target?'selected':''}>${p.emoji} ${esc(p.name)}</option>`).join('')}</select>
+    <select id="trTo" ${counter?'disabled':''} onchange="showTrade(this.value,{from:'${me}'})">${others.map(p=>`<option value="${p.id}" ${p.id===target?'selected':''}>${p.emoji} ${esc(p.name)}</option>`).join('')}</select>
     <div class="tcols">
-      <div><h4>Vos das (${esc(P(me).name)})</h4><input type="number" id="trGm" min="0" step="100000" placeholder="₲ dinero">${chk(me,'trGp')}</div>
-      <div><h4>Pedís a ${esc(T.name)}</h4><input type="number" id="trRm" min="0" step="100000" placeholder="₲ dinero">${chk(target,'trRp')}</div>
+      <div><h4>${NET.mode==='local'?esc(P(me).name)+' da':'Vos das'}</h4><input type="number" id="trGm" min="0" step="100000" placeholder="₲ dinero" value="${pf.gm||''}">${chk(me,'trGp',pf.gp,pf.gc)}</div>
+      <div><h4>Pedís a ${esc(T.name)}</h4><input type="number" id="trRm" min="0" step="100000" placeholder="₲ dinero" value="${pf.rm||''}">${chk(target,'trRp',pf.rp,pf.rc)}</div>
     </div>
     <p class="muted">Tip: activá el micrófono o usá el chat para negociar. Las calles con casas no se pueden negociar (vendé las casas primero).</p>
-    <button class="btn green wide" onclick="sendTrade()">Enviar oferta</button>`;
+    <button class="btn green wide" onclick="sendTrade()">${counter?'🔁 Enviar contraoferta':'Enviar oferta'}</button>`;
   modal(h,'trade');
 }
 function sendTrade(){
   const vals=c=>[...document.querySelectorAll('.'+c+':checked')].map(x=>+x.value);
   const cards=c=>document.querySelectorAll('.'+c+':checked').length;
-  doAct({type:'trade', to:$('#trTo').value, gm:+$('#trGm').value||0, rm:+$('#trRm').value||0, gp:vals('trGp'), rp:vals('trRp'), gc:cards('trGpC'), rc:cards('trRpC')});
-  closeModal();
+  doAct({type:'trade', to:$('#trTo').value, gm:+$('#trGm').value||0, rm:+$('#trRm').value||0, gp:vals('trGp'), rp:vals('trRp'), gc:cards('trGpC'), rc:cards('trRpC'),
+         replaces:TRADE_CTX.replaces||null}, TRADE_CTX.from||undefined);
+  TRADE_CTX={}; closeModal();
+}
+function counterTrade(id){   // la oferta recibida, dada vuelta: lo que me daban ahora lo pido yo y viceversa
+  const t=S.trades.find(x=>x.id===id); if(!t) return;
+  showTrade(t.from, {from:t.to, replaces:t.id, prefill:{gm:t.rm, rm:t.gm, gp:t.rp, rp:t.gp, gc:t.rc||0, rc:t.gc||0}});
 }
 function confirmBankrupt(){
   modal(`<h3>¿Declararte en quiebra?</h3><p>Perdés la partida. Tus propiedades pasan a quien le debés (o al Banco).</p><button class="btn red wide" onclick="closeModal();doAct({type:'bankrupt'})">Sí, me declaro en quiebra</button>`,'bk');
