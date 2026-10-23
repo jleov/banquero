@@ -642,11 +642,39 @@ function cleanSel(bl){
   for(const b of BILLS){ const n=bl[b.v]|0; if(n<0) return null; if(n) sel[b.v]=n; }
   return billCount(sel) ? sel : null;
 }
+// pagos entre jugadores "en mano" (alquileres y tarjetas de pagar/cobrar a cada jugador):
+// se hacen de a uno, con la misma ventana de billetes y vuelto
+function queuePay(from, to, amt, reason, idx){ (S.payQ=S.payQ||[]).push({from, to, amt, reason, idx:idx==null?null:idx}); }
+function startNextPay(){
+  while(S.payQ && S.payQ.length){
+    const q=S.payQ.shift(), p=P(q.from), o=P(q.to);
+    if(!p || !o || p.bk || o.bk) continue;
+    const offline = NET.mode==='host' && !p.bot && !p.conn;
+    if(p.money>=q.amt && !(p.bot && o.bot) && !offline){
+      syncBills(p); syncBills(o);
+      S.rentSeq=(S.rentSeq||0)+1;
+      S.rent={id:S.rentSeq+'-'+Math.random().toString(36).slice(2,8), from:p.id, to:o.id, amt:q.amt, idx:q.idx, reason:q.reason,
+              stage:'pay', paid:null, change:0, at:Date.now()};
+      S.tp='rent'; log(`💵 ${p.name} tiene que pagarle ${fmt(q.amt)} a ${o.name} (${q.reason}).`);
+      return true;
+    }
+    pay(p, q.amt, o, q.reason);   // sin plata suficiente, bots entre sí o desconectado: automático
+  }
+  S.rent=null; afterMove(cur()); return false;
+}
+function drainPays(){   // resolver todo de una vez (cuando se salta el turno de alguien)
+  const R=S.rent;
+  if(R){ const p=P(R.from), o=P(R.to);
+    if(R.stage==='pay') pay(p, R.amt, o, R.reason);
+    else { o.money-=R.change; p.money+=R.change; }
+    S.rent=null; }
+  while(S.payQ && S.payQ.length){ const q=S.payQ.shift(), p=P(q.from), o=P(q.to); if(p && o && !p.bk && !o.bk) pay(p, q.amt, o, q.reason); }
+}
 function finishRent(){
   const R=S.rent; if(!R) return; const p=P(R.from), owner=P(R.to);
   p.cred=owner.id; S.rent=null;
-  log(`✅ ${p.name} pagó ${fmt(R.amt)} de alquiler a ${owner.name}.`);
-  afterMove(p);
+  log(`✅ ${p.name} pagó ${fmt(R.amt)} a ${owner.name} (${R.reason}).`);
+  startNextPay();
 }
 function autoGiveChange(){
   const R=S.rent, owner=P(R.to), payer=P(R.from);
@@ -657,7 +685,7 @@ function autoGiveChange(){
 }
 function autoRent(){   // resolver todo solo (jugador desconectado)
   const R=S.rent; if(!R) return;
-  if(R.stage==='pay'){ const p=P(R.from), owner=P(R.to); p.money-=R.amt; owner.money+=R.amt; S.rent=null; log(`${p.name} paga ${fmt(R.amt)} a ${owner.name} (alquiler).`); afterMove(p); }
+  if(R.stage==='pay'){ const p=P(R.from), owner=P(R.to); S.rent=null; pay(p, R.amt, owner, R.reason); startNextPay(); }
   else autoGiveChange();
 }
 function afterMove(p){ S.pendingBuy=null; S.tp = (S.rolledDbl && !p.jail && !p.bk) ? 'roll' : 'end'; }
@@ -679,16 +707,9 @@ function land(p, dice, mode){
       if(o.o===p.id) break;
       if(o.m){ log('Está hipotecada: no se cobra alquiler.'); break; }
       const owner=P(o.o); if(owner.bk) break;
-      const amt=rentOf(p.pos,dice,mode);
-      if(p.money>=amt && !(p.bot && owner.bot)){   // se paga en mano: el que cae elige los billetes y el dueño da el vuelto
-        syncBills(p); syncBills(owner);
-        S.rentSeq=(S.rentSeq||0)+1;
-        S.rent={id:S.rentSeq+'-'+Math.random().toString(36).slice(2,8), from:p.id, to:owner.id, amt, idx:p.pos, stage:'pay', paid:null, change:0, at:Date.now()};
-        S.tp='rent'; log(`💵 ${p.name} tiene que pagarle ${fmt(amt)} a ${owner.name} (alquiler de ${sp.n}).`);
-        return;
-      }
-      pay(p, amt, owner, 'alquiler de '+sp.n);
-      break;
+      // se paga en mano: el que cae elige los billetes y el dueño da el vuelto
+      queuePay(p.id, owner.id, rentOf(p.pos,dice,mode), 'alquiler de '+sp.n, p.pos);
+      startNextPay(); return;
     }
     case 'tax': pay(p, sp.a*K, null, sp.n); break;
     case 'cc': case 'ca': drawCard(p, sp.t); return;
@@ -713,9 +734,13 @@ function drawCard(p, deck){
       const amt=(h*c.h+ho*c.ho)*K; if(amt>0) pay(p,amt,null,'refacciones'); else log('No tiene construcciones: no paga nada.');
       break;
     }
-    case 'each':
-      for(const o of alive()) if(o.id!==p.id){ if(c.v<0) pay(p,-c.v*K,o,'tarjeta'); else pay(o,c.v*K,p,'tarjeta'); }
-      break;
+    case 'each':   // pagar o cobrar a cada jugador: en mano, uno por uno, cuando se cierre la tarjeta
+      for(const o of alive()) if(o.id!==p.id){
+        const why = c.v<0 ? `tarjeta ${DECK_NAME[deck]}: comisión vecinal` : `tarjeta ${DECK_NAME[deck]}: cumpleaños de ${p.name}`;
+        if(c.v<0) queuePay(p.id, o.id, -c.v*K, why); else queuePay(o.id, p.id, c.v*K, why);
+      }
+      S.tp='rent';   // nadie juega hasta terminar los pagos
+      return;
     case 'nearest': {
       let i=p.pos; do{ i=(i+1)%40; }while(B[i].t!==c.type);
       if(i<p.pos) passGo(p);
@@ -854,7 +879,7 @@ function act(pid, a){
       S.trades=S.trades.filter(x=>x!==t); log(`❌ Negocio entre ${P(t.from).name} y ${P(t.to).name} cancelado.`); break; }
     case 'rentPay': {   // el que cayó entrega billetes
       const R=S.rent; if(!R || R.stage!=='pay' || R.from!==pid) return;
-      if(p.money<R.amt){ pay(p,R.amt,P(R.to),'alquiler de '+B[R.idx].n); S.rent=null; afterMove(p); break; }   // ya no le alcanza
+      if(p.money<R.amt){ S.rent=null; pay(p,R.amt,P(R.to),R.reason); startNextPay(); break; }   // ya no le alcanza
       const sel=a.auto ? chooseBills(p.bills, R.amt) : cleanSel(a.bills);
       if(!sel) return 'Billetes inválidos.';
       for(const v in sel) if(sel[v]>(p.bills[v]||0)) return 'No tenés esos billetes.';
@@ -886,14 +911,20 @@ function act(pid, a){
     case 'cardClose':   // solo el que sacó la tarjeta la cierra (o el anfitrión si se desconectó)
       if(!S.card || !S.card.open) return;
       if(pid!==S.card.pid && !(pid===S.hostPid && !P(S.card.pid).conn)) return;
-      S.card.open=false; break;
+      S.card.open=false;
+      if(!S.rent && S.payQ && S.payQ.length) startNextPay();   // pagos de la tarjeta: empiezan al cerrarla
+      break;
+    case 'payForce':   // el anfitrión resuelve solo un pago trabado por alguien desconectado
+      if(pid!==S.hostPid || !S.rent) return;
+      if(P(S.rent.from).conn && P(S.rent.to).conn) return;
+      autoRent(); break;
     case 'exchange':   // cambiar un billete en el Banco por otros más chicos
       if(!canExchange(pid)) return 'Podés pedir cambio al Banco solo en tu turno.';
       if(!exchangeBill(p, a.v, a.opt)) return 'Ese billete no se puede cambiar.';
       log(`🏦 ${p.name} cambia un billete de ${fmt(+a.v)} en el Banco por ${billText(CHANGE_OPTS[+a.v][a.opt|0])}.`); break;
     case 'skipTurn':
       if(pid!==S.hostPid || cur().conn) return; log(`${cur().name} no está conectado: se salta su turno.`);
-      if(S.card) S.card.open=false; if(S.rent) autoRent(); nextTurn(); break;
+      if(S.card) S.card.open=false; drainPays(); nextTurn(); break;
     default: return;
   }
   checkWinner(); commit();
@@ -1487,8 +1518,10 @@ function showRentPicker(refresh){
   const bills=me.bills||{}, sel=PICK.sel, tot=billTotal(sel), target=paying?R.amt:R.change;
   const avail=BILLS.filter(b=>(bills[b.v]||0)-(sel[b.v]||0)>0);
   let h = paying
-    ? `<h3>💵 Pagar el alquiler</h3><p>${NET.mode==='local'?`<b>${esc(me.name)}</b>, caíste`:'Caíste'} en <b>${B[R.idx].n}</b> de <b style="color:${other.color}">${other.emoji} ${esc(other.name)}</b>.<br>Alquiler: <b style="font-size:1.2em">${fmt(R.amt)}</b></p>`
-    : `<h3>💵 Dar el vuelto</h3><p><b style="color:${other.color}">${other.emoji} ${esc(other.name)}</b> te pagó <b>${billText(R.paid)}</b> (${fmt(R.amt+R.change)}) por un alquiler de ${fmt(R.amt)}.<br>${NET.mode==='local'?esc(me.name)+', tenés':'Tenés'} que darle de vuelto: <b style="font-size:1.2em">${fmt(R.change)}</b></p>`;
+    ? (R.idx!=null
+        ? `<h3>💵 Pagar el alquiler</h3><p>${NET.mode==='local'?`<b>${esc(me.name)}</b>, caíste`:'Caíste'} en <b>${B[R.idx].n}</b> de <b style="color:${other.color}">${other.emoji} ${esc(other.name)}</b>.<br>Alquiler: <b style="font-size:1.2em">${fmt(R.amt)}</b></p>`
+        : `<h3>💵 Pagar a ${esc(other.name)}</h3><p>${NET.mode==='local'?`<b>${esc(me.name)}</b>, tenés`:'Tenés'} que pagarle a <b style="color:${other.color}">${other.emoji} ${esc(other.name)}</b> por la ${esc(R.reason)}.<br>Monto: <b style="font-size:1.2em">${fmt(R.amt)}</b>${S.payQ&&S.payQ.length?`<br><span class="muted">Después ${S.payQ.length>1?'siguen':'sigue'} ${S.payQ.length} pago${S.payQ.length>1?'s':''} más.</span>`:''}</p>`)
+    : `<h3>💵 Dar el vuelto</h3><p><b style="color:${other.color}">${other.emoji} ${esc(other.name)}</b> te pagó <b>${billText(R.paid)}</b> (${fmt(R.amt+R.change)}) por ${R.idx!=null?'un alquiler':'la '+esc(R.reason)} de ${fmt(R.amt)}.<br>${NET.mode==='local'?esc(me.name)+', tenés':'Tenés'} que darle de vuelto: <b style="font-size:1.2em">${fmt(R.change)}</b></p>`;
   h+=`<div class="plabel">${PICK.exch?'🏦 Tocá el billete que querés cambiar en el Banco:':'Tus billetes — tocá para '+(paying?'entregar':'dar')+':'}</div>
     <div class="bills pickrow ${PICK.exch?'exch':''}">${avail.map(b=>billChip(b.v,(bills[b.v]||0)-(sel[b.v]||0),`pickBill(${b.v})`,'pickable')).join('')||'<span class="muted">No te quedan billetes</span>'}</div>
     <div class="plabel">${paying?'Billetes que entregás':'Vuelto que das'}: <b>${fmt(tot)}</b></div>
@@ -1539,7 +1572,8 @@ function renderCenter(){
   }
   if(S.tp==='rent' && S.rent){   // pago de alquiler en mano
     const R=S.rent, payer=P(R.from), owner=P(R.to), acts=[];
-    h+=`<div class="status">💵 Alquiler de ${B[R.idx].n}: ${fmt(R.amt)}</div>`;
+    h+=`<div class="status">💵 ${R.idx!=null?'Alquiler de '+B[R.idx].n:esc(R.reason.replace(/^tarjeta /,'Tarjeta '))}: ${fmt(R.amt)}</div>`;
+    if(S.payQ && S.payQ.length) h+=`<div class="muted">Faltan ${S.payQ.length} pago${S.payQ.length>1?'s':''} más</div>`;
     if(R.stage==='pay'){
       h+=`<div><span style="color:${payer.color}">${payer.emoji} ${esc(payer.name)}</span> le paga a <span style="color:${owner.color}">${owner.emoji} ${esc(owner.name)}</span></div>`;
       if(canAct(payer.id)) acts.push(`<button class="btn green" onclick="showRentPicker()">💵 Elegir billetes</button>`,`<button class="btn gray" onclick="doAct({type:'rentPay',auto:true},'${payer.id}')">Pagar automático</button>`);
@@ -1550,9 +1584,13 @@ function renderCenter(){
       else if(canAct(payer.id)){ h+=`<div class="muted">Esperando tu vuelto…</div>`; if(Date.now()-R.at>30000) acts.push(`<button class="btn gold" onclick="doAct({type:'rentChange',auto:true},'${payer.id}')">Pedir vuelto automático</button>`); }
       else h+=`<div class="muted">Está contando el vuelto…</div>`;
     }
-    if(NET.mode==='host' && !payer.conn) acts.push(`<button class="btn gray" onclick="doAct({type:'skipTurn'})">Saltar su turno</button>`);
+    if(NET.mode==='host' && (!payer.conn || !owner.conn) && !(payer.bot||owner.bot))
+      acts.push(`<button class="btn gray" onclick="doAct({type:'payForce'})">Resolver automático (${esc((!payer.conn?payer:owner).name)} se desconectó)</button>`);
     if(acts.length) h+=`<div class="acts">${acts.join('')}</div>`;
     c.innerHTML=h; return;
+  }
+  if(S.tp==='rent'){   // pagos de una tarjeta que esperan a que se cierre
+    c.innerHTML=h+`<div class="status">💵 Pagos de la tarjeta</div><div class="muted">Empiezan cuando ${esc(S.card?S.card.who:'')} cierre la tarjeta…</div>`; return;
   }
   const p=cur(), mine=canAct(p.id);
   h+=`<div class="status">${NET.mode==='local'||!mine?'Turno de ':''}<span style="color:${p.color}">${p.emoji} ${esc(p.name)}</span>${mine&&NET.mode!=='local'?' — ¡es tu turno!':''}</div>`;
