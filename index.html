@@ -18,7 +18,7 @@ html,body{margin:0;min-height:100%}
 body{background:radial-gradient(circle at 30% 20%,#14694f,#0b3d2e 70%) fixed;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);-webkit-tap-highlight-color:transparent}
 .screen{display:none}.screen.on{display:block}
 input,button,select{font:inherit}
-input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1px solid #c9c2a8;border-radius:10px;background:#fff;color:var(--ink)}
+input[type=text],input[type=password],input[type=number],select{width:100%;padding:10px 12px;border:1px solid #c9c2a8;border-radius:10px;background:#fff;color:var(--ink)}
 .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--blue);color:#fff;touch-action:manipulation}
 .btn.red{background:var(--red)}.btn.gray{background:#7a7a7a}.btn.gold{background:var(--gold);color:#222}.btn.green{background:#2a9d3f}
 .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -299,6 +299,10 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:80;max-width:90vw;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.5)}
 .netbar{position:fixed;top:0;left:0;right:0;background:var(--red);color:#fff;text-align:center;font-size:13px;padding:4px;z-index:70;display:none}
 .rules h4{margin:12px 0 4px}.rules p,.rules li{font-size:14px;line-height:1.4}
+/* panel del dueño: mirar sin que te vean */
+#spyBar{display:none;position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:60;background:#4a2f7a;color:#fff;padding:6px 8px 6px 14px;border-radius:20px;font-size:13px;box-shadow:0 3px 10px #0005;align-items:center;gap:8px;white-space:nowrap;max-width:calc(100vw - 16px)}
+body.spy #spyBar{display:flex}
+body.spy #voiceBar, body.spy .tabs [data-tab=chat], body.spy #feedChat, body.spy .chatin{display:none!important}
 </style>
 </head>
 <body>
@@ -349,9 +353,23 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
       <button class="btn green wide" id="btnInstall">📲 Instalar en este dispositivo</button>
     </div>
     <button class="btn gray wide" onclick="showRules()">📜 Reglas del juego</button>
+    <button class="btn wide" id="btnOwner" style="display:none;margin-top:8px;background:#4a2f7a" onclick="openOwnerPanel()">👑 Panel del dueño</button>
     <p class="muted" id="musicCredit" style="color:#cfe8d5;text-align:center;font-size:11px;margin-top:14px"></p>
   </div>
 </div>
+
+<!-- ============ PANEL DEL DUEÑO ============ -->
+<div class="screen" id="dueno">
+  <div class="menu">
+    <div class="logo"><h1>BAN<span>₲</span>UERO</h1></div>
+    <div class="box">
+      <h3>👑 Panel del dueño</h3>
+      <div id="ownerBody"></div>
+      <button class="btn gray wide" style="margin-top:8px" onclick="history.replaceState(null,'',location.pathname);show('menu')">🏠 Volver al inicio</button>
+    </div>
+  </div>
+</div>
+<div id="spyBar">🕵️ Mirando la sala <b id="spyCode"></b> sin que te vean <button class="btn sm" onclick="ownerSpyExit()">Volver al panel</button></div>
 
 <!-- ============ SALA ============ -->
 <div class="screen" id="lobby">
@@ -740,7 +758,7 @@ function startGame(){
   const players = shuffle(S.players).map(p=>Object.assign(p,{money:START_MONEY,bills:billsOf(START_MONEY),pos:0,jail:false,jailT:0,jcards:[],bk:false,cred:null}));
   S = {phase:'play', players, seq:S.seq, hostPid:S.hostPid, props:{}, turn:0, tp:'roll', dbl:0, rolledDbl:false,
        roll:[1,1], rollId:0, card:null, cardId:0, pendingBuy:null, decks:{cc:shuffle(range(CARDS.cc.length)), ca:shuffle(range(CARDS.ca.length))},
-       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0, rolled:{}, observers:S.observers||[], ver:2, turnAt:Date.now()};
+       trades:[], tradeSeq:0, log:[], logSeq:0, winner:null, rent:null, rentSeq:0, rolled:{}, observers:S.observers||[], ownerTok:S.ownerTok, ver:2, turnAt:Date.now(), startedAt:Date.now()};
   log('¡Empieza la partida! El Banquero reparte a cada jugador '+fmt(START_MONEY)+': 10 billetes de ₲ 100.000, 6 de ₲ 50.000, 6 de ₲ 20.000, 5 de ₲ 10.000, 4 de ₲ 5.000, 4 de ₲ 2.000 y 2 monedas de ₲ 1.000.');
   log('Turno de '+cur().name+'.');
 }
@@ -1219,13 +1237,14 @@ function publicState(forPid){
     if(s.phase==='play' && p.id!==forPid){ p.neg = p.money<0; p.money=null; delete p.bills; }
   });
   (s.observers||[]).forEach(o=>delete o.token);
+  delete s.ownerTok;
   return s;
 }
 function commit(){
   if(S && S.phase!=='lobby' && NET.mode!=='client') S.players.forEach(syncBills);
   if(NET.mode==='host'){
     for(const pid in NET.conns){ const c=NET.conns[pid]; if(c && c.open) try{ c.send({t:'state', s:publicState(pid)}); }catch(e){} }
-    sendBackups();
+    sendBackups(); ownerReport();
     if(!NET.noSave) store('bnq_host',{code:NET.code, S, CHAT:CHAT.slice(-80), myPid:NET.myPid, at:Date.now()});
   } else if(NET.mode==='local'){
     store('bnq_local',{S, at:Date.now()});
@@ -1233,6 +1252,7 @@ function commit(){
   render();
 }
 function doAct(a, pid){
+  if(NET.mode==='spy') return toast('🕵️ Estás mirando sin que te vean: no podés tocar nada.');
   if(NET.mode==='client'){ if(NET.hostConn && NET.hostConn.open) NET.hostConn.send({t:'act',a}); else toast('Sin conexión con el anfitrión.'); return; }
   const r=act(pid || meId(), a); if(typeof r==='string') toast(r);
 }
@@ -1241,6 +1261,178 @@ function newPeer(id){
     {urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},
     {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'],username:'peerjs',credential:'peerjsp'}
   ]}});
+}
+
+/* ====================== DUEÑO DEL JUEGO ====================== */
+// Cada sala le avisa al panel del dueño (si está abierto) cómo va la partida. Para que nadie se haga pasar
+// por el dueño, el panel firma con una llave que sale de su contraseña y las salas lo comprueban con esta llave pública.
+const OWNER_PUB = null;   // {x:'…', y:'…'}
+const OWNER_ID = PREFIX+'dueno';
+const EC={name:'ECDSA', namedCurve:'P-256'}, SIG={name:'ECDSA', hash:'SHA-256'};
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const unb64u = s => Uint8Array.from(atob(String(s).replace(/-/g,'+').replace(/_/g,'/')), c=>c.charCodeAt(0));
+let ownerPubKey=null;
+async function ownerVerify(nonce, sig){
+  if(!OWNER_PUB || !window.crypto || !crypto.subtle) return false;
+  try{
+    ownerPubKey = ownerPubKey || await crypto.subtle.importKey('jwk', {kty:'EC', crv:'P-256', x:OWNER_PUB.x, y:OWNER_PUB.y}, EC, false, ['verify']);
+    return await crypto.subtle.verify(SIG, ownerPubKey, unb64u(sig), new TextEncoder().encode(nonce));
+  }catch(e){ return false; }
+}
+// la misma contraseña da siempre la misma llave, en cualquier celular o PC
+async function ownerKeyFromPassword(pw){
+  const enc=new TextEncoder();
+  const base=await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveBits']);
+  const d=new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', salt:enc.encode('banquero-paraguayo-dueno-v1'), iterations:300000, hash:'SHA-256'}, base, 256));
+  const der=new Uint8Array([0x30,0x41,0x02,0x01,0x00,0x30,0x13,0x06,0x07,0x2a,0x86,0x48,0xce,0x3d,0x02,0x01,0x06,0x08,0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07,0x04,0x27,0x30,0x25,0x02,0x01,0x01,0x04,0x20, ...d]);
+  const key=await crypto.subtle.importKey('pkcs8', der, EC, true, ['sign']);
+  return crypto.subtle.exportKey('jwk', key);
+}
+
+// --- lado de la sala (lo hace el anfitrión) ---
+const OWNER={conn:null, ok:false, watch:false, lastSeen:0, tried:0, nonce:null};
+function ownerDrop(){ const c=OWNER.conn; Object.assign(OWNER,{conn:null, ok:false, watch:false}); try{ c && c.close(); }catch(e){} }
+function ownerLinkTick(){
+  if(NET.mode!=='host' || !OWNER_PUB || !NET.peer || !NET.peer.open){ if(OWNER.conn) ownerDrop(); return; }
+  const c=OWNER.conn;
+  if(c && c.open && Date.now()-OWNER.lastSeen<20000) return;   // conectado y el panel da señales
+  if(c && !c.open && Date.now()-OWNER.tried<10000) return;      // todavía conectando
+  ownerDrop();
+  const n=NET.peer.connect(OWNER_ID, {reliable:true});
+  Object.assign(OWNER,{conn:n, tried:Date.now(), lastSeen:Date.now()});
+  n.on('open', ()=>{ OWNER.nonce=b64u(crypto.getRandomValues(new Uint8Array(18))); n.send({t:'hi', nonce:OWNER.nonce}); });
+  n.on('data', async d=>{
+    if(OWNER.conn!==n || !d || typeof d!=='object') return;
+    OWNER.lastSeen=Date.now();
+    if(d.t==='proof'){ if(await ownerVerify(OWNER.nonce, d.sig)){ OWNER.ok=true; ownerReport(); } else ownerDrop(); return; }
+    if(!OWNER.ok || NET.mode!=='host') return;
+    if(d.t==='watch'){ OWNER.watch=!!d.on; ownerReport(); }
+    else if(d.t==='iam'){ S.ownerTok=[...new Set([...(S.ownerTok||[]), String(d.token)])].slice(-4); commit(); try{ n.send({t:'iamOk', code:NET.code}); }catch(e){} }
+    else if(d.t==='ping'){ try{ n.send({t:'pong'}); }catch(e){} }
+  });
+  n.on('close', ()=>{ if(OWNER.conn===n) Object.assign(OWNER,{conn:null, ok:false, watch:false}); });
+}
+setInterval(ownerLinkTick, 4000);
+function ownerReport(){
+  const c=OWNER.conn; if(!OWNER.ok || !c || !c.open || !S || NET.mode!=='host') return;
+  let turn=null; try{ if(S.phase==='play') turn=cur().name; }catch(e){}
+  const info={phase:S.phase, host:(P(S.hostPid)||{}).name||'', turn, started:S.startedAt||null,
+    players:S.players.map(p=>({n:p.name, e:p.emoji, bot:!!p.bot, conn:!!p.conn, bk:!!p.bk})),
+    obs:(S.observers||[]).filter(o=>o.conn).map(o=>({n:o.name, owner:!!o.owner}))};
+  try{
+    c.send({t:'room', code:NET.code, info});
+    if(OWNER.watch) c.send({t:'spy', code:NET.code, s:publicState(null)});   // el tablero, sin la plata secreta ni el chat
+  }catch(e){}
+}
+
+// --- lado del panel del dueño ---
+const ADMIN={peer:null, key:null, rooms:{}, watching:null, joining:null, err:''};
+function openOwnerPanel(){
+  if(NET.mode && NET.mode!=='spy') return toast('Primero salí de la partida con 🏠 Inicio.');
+  if(location.hash!=='#panel-dueno') history.replaceState(null,'','#panel-dueno');
+  show('dueno'); renderOwner();
+  const saved=load('bnq_owner');
+  if(saved && !ADMIN.key) ownerStart(saved);
+}
+async function ownerLogin(){
+  const pw=$('#ownerPw').value;
+  if(pw.length<8) return toast('La contraseña tiene que tener al menos 8 letras o números.');
+  if(!window.crypto || !crypto.subtle) return toast('Abrí el juego desde el enlace con https para usar el panel.');
+  $('#ownerPw').value=''; $('#ownerMsg').textContent='Comprobando…';
+  const jwk=await ownerKeyFromPassword(pw);
+  if(!OWNER_PUB){ ADMIN.setup=jwk.x+'.'+jwk.y; renderOwner(); return; }
+  if(jwk.x!==OWNER_PUB.x || jwk.y!==OWNER_PUB.y){ $('#ownerMsg').textContent='❌ Contraseña incorrecta.'; return; }
+  store('bnq_owner', jwk); ownerStart(jwk);
+}
+async function ownerStart(jwk){
+  try{ ADMIN.key=await crypto.subtle.importKey('jwk', jwk, EC, false, ['sign']); }
+  catch(e){ store('bnq_owner', undefined); ADMIN.key=null; return renderOwner(); }
+  if(!OWNER_PUB || jwk.x!==OWNER_PUB.x){ store('bnq_owner', undefined); ADMIN.key=null; return renderOwner(); }
+  ADMIN.err='Conectando…'; renderOwner(); refreshOwnerBtn();
+  const peer=ADMIN.peer=newPeer(OWNER_ID);
+  peer.on('open', ()=>{ ADMIN.err=''; renderOwner(); });
+  peer.on('disconnected', ()=>{ if(!peer.destroyed) setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); });
+  peer.on('error', e=>{
+    if(e.type==='unavailable-id'){ ADMIN.err='El panel del dueño ya está abierto en otro dispositivo o pestaña. Cerralo allá y tocá “Reintentar”.'; peer.destroy(); ADMIN.peer=null; renderOwner(); }
+  });
+  peer.on('connection', conn=>{
+    conn.on('data', async d=>{
+      if(!d || typeof d!=='object') return;
+      if(d.t==='hi'){ const sig=await crypto.subtle.sign(SIG, ADMIN.key, new TextEncoder().encode(String(d.nonce))); conn.send({t:'proof', sig:b64u(sig)}); return; }
+      if(!d.code) return;
+      const old=ADMIN.rooms[d.code];
+      if(old && old.conn!==conn){ try{ old.conn.close(); }catch(e){} }   // cambió el anfitrión de esa sala
+      const r=ADMIN.rooms[d.code]={conn, info:(old&&old.info)||null, at:Date.now()};
+      conn.code=d.code;
+      if(d.t==='room'){ r.info=d.info;
+        if(ADMIN.watching===d.code && (!old || old.conn!==conn)) conn.send({t:'watch', on:true});
+        if(ADMIN.joining===d.code && (!old || old.conn!==conn)) conn.send({t:'iam', token:myToken});
+        renderOwner(); }
+      else if(d.t==='spy' && ADMIN.watching===d.code && NET.mode==='spy'){ S=d.s; render(); }
+      else if(d.t==='iamOk' && ADMIN.joining===d.code){ ADMIN.joining=null; clientJoin(d.code); }
+    });
+    conn.on('close', ()=>{ const r=conn.code && ADMIN.rooms[conn.code]; if(r && r.conn===conn){ delete ADMIN.rooms[conn.code]; renderOwner(); } });
+  });
+}
+setInterval(()=>{   // pulso con cada sala y limpieza de las que ya no responden
+  let gone=false;
+  for(const code in ADMIN.rooms){ const r=ADMIN.rooms[code];
+    if(Date.now()-r.at>25000){ try{ r.conn.close(); }catch(e){} delete ADMIN.rooms[code]; gone=true; continue; }
+    if(r.conn.open) try{ r.conn.send({t:'ping'}); }catch(e){} }
+  if(gone) renderOwner();
+}, 5000);
+function ownerRetry(){ if(ADMIN.peer){ try{ ADMIN.peer.destroy(); }catch(e){} ADMIN.peer=null; } const s=load('bnq_owner'); if(s) ownerStart(s); }
+function ownerLogout(){ if(ADMIN.peer) try{ ADMIN.peer.destroy(); }catch(e){} Object.assign(ADMIN,{peer:null, key:null, rooms:{}, watching:null, joining:null, err:''}); store('bnq_owner', undefined); refreshOwnerBtn(); renderOwner(); }
+function refreshOwnerBtn(){ $('#btnOwner').style.display = load('bnq_owner') ? 'block' : 'none'; }
+const ago = t => { const m=Math.round((Date.now()-t)/60000); return m<1?'recién':m<60?`hace ${m} min`:`hace ${Math.floor(m/60)} h ${m%60} min`; };
+function renderOwner(){
+  if(!$('#dueno').classList.contains('on')) return;
+  const el=$('#ownerBody');
+  if(!ADMIN.key){
+    el.innerHTML = ADMIN.setup
+      ? `<p>✅ Contraseña lista. Mandale este <b>código público</b> a Claude para activar el panel (no es tu contraseña y no sirve para entrar):</p>
+         <div class="code" style="font-size:13px;letter-spacing:0;word-break:break-all;user-select:all">${ADMIN.setup}</div>
+         <button class="btn gray wide" onclick="navigator.clipboard.writeText('${ADMIN.setup}').then(()=>toast('Código copiado.'))">📋 Copiar código</button>`
+      : `<p>Escribí la contraseña del dueño. Se pide una sola vez en cada dispositivo.</p>
+         <input type="password" id="ownerPw" placeholder="Contraseña del dueño" autocomplete="current-password" onkeydown="if(event.key==='Enter')ownerLogin()">
+         <button class="btn green wide" style="margin-top:8px" onclick="ownerLogin()">🔑 Entrar</button><p class="muted" id="ownerMsg"></p>`;
+    return;
+  }
+  const rooms=Object.entries(ADMIN.rooms).filter(([c,r])=>r.info).sort((a,b)=>(a[1].info.phase==='play'?0:1)-(b[1].info.phase==='play'?0:1));
+  const phase={lobby:'⏳ En la sala de espera', play:'🎲 Jugando', over:'🏁 Terminada'};
+  el.innerHTML = (ADMIN.err?`<p class="observer">${esc(ADMIN.err)} ${ADMIN.peer?'':'<button class="btn sm" onclick="ownerRetry()">🔄 Reintentar</button>'}</p>`:'')
+    + `<p class="muted" style="margin-top:0">Salas abiertas ahora: <b>${rooms.length}</b>. Las salas aparecen solas mientras este panel está abierto (tardan unos segundos).</p>`
+    + (rooms.length ? rooms.map(([code,r])=>{ const i=r.info;
+        return `<div class="observer" style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:18px;letter-spacing:2px">${code}</b><span class="muted">${phase[i.phase]||i.phase}${i.started?' · '+ago(i.started):''}</span></div>
+          <div style="margin:6px 0">${i.players.map(p=>`<span style="white-space:nowrap;${p.bk?'opacity:.5;text-decoration:line-through':''}">${p.e} ${p.bot?'🤖':''}${esc(p.n)}${p.n===i.host?' 👑':''}${!p.bot&&!p.conn?' ⚠️':''}</span>`).join(' · ')}</div>
+          ${i.turn?`<div class="muted">Turno de <b>${esc(i.turn)}</b></div>`:''}
+          ${i.obs.length?`<div class="muted">👀 Mirando: ${i.obs.map(o=>(o.owner?'👑 ':'')+esc(o.n)).join(', ')}</div>`:''}
+          <div class="row" style="margin-top:8px">
+            <button class="btn sm gray" onclick="ownerSpy('${code}')">🕵️ Mirar sin que me vean</button>
+            <button class="btn sm green" onclick="ownerJoin('${code}')">👑 Entrar a la vista</button></div></div>`; }).join('')
+      : `<p style="text-align:center;font-size:40px;margin:10px 0">🛋️</p><p class="muted" style="text-align:center">No hay salas abiertas en este momento.</p>`)
+    + `<button class="btn gray wide" style="margin-top:6px" onclick="ownerLogout()">🔒 Cerrar sesión de dueño en este dispositivo</button>`;
+}
+// mirar una partida sin aparecer en ningún lado: solo el tablero (sin chat, sin voz, sin la plata secreta)
+function ownerSpy(code){
+  const r=ADMIN.rooms[code]; if(!r || !r.conn.open) return toast('Esa sala ya no responde.');
+  ADMIN.watching=code; NET.mode='spy'; NET.code=code; NET.myPid=null; NET.obs=null; S=null; CHAT=[]; renderChat();
+  document.body.classList.add('spy'); $('#spyCode').textContent=code;
+  document.querySelector('.tabs [data-tab=log]').click();
+  r.conn.send({t:'watch', on:true}); toast('🕵️ Mirando la sala '+code+' sin que nadie lo sepa.');
+}
+function ownerSpyExit(){
+  const r=ADMIN.rooms[ADMIN.watching]; try{ r && r.conn.send({t:'watch', on:false}); }catch(e){}
+  ADMIN.watching=null; document.body.classList.remove('spy');
+  document.querySelector('.tabs [data-tab=chat]').click();
+  leaveToMenu(); openOwnerPanel();
+}
+// entrar a la vista de todos: como observador con 👑, con chat y micrófono
+function ownerJoin(code){
+  const r=ADMIN.rooms[code]; if(!r || !r.conn.open) return toast('Esa sala ya no responde.');
+  if(!$('#myName').value.trim()) $('#myName').value='Dueño';
+  ADMIN.joining=code; r.conn.send({t:'iam', token:myToken}); toast('Entrando a la sala '+code+'…');
 }
 
 // ---------- anfitrión ----------
@@ -1385,14 +1577,19 @@ function hostOnData(conn, d){
     let p=S.players.find(x=>x.token===d.token), ob=null, why='';
     if(!p) ob=S.observers.find(x=>x.token===d.token)||null;
     if(!p && !ob){
+      const isOwner=(S.ownerTok||[]).includes(d.token);   // el dueño del juego entra a mirar (a la vista de todos)
       // se puede jugar si hay lugar y la partida no avanzó (en la sala, o antes de que todos hayan tirado una vez)
-      const canPlay = S.players.length<6 && (S.phase==='lobby' || (S.phase==='play' && !firstRoundDone()));
+      const canPlay = !isOwner && S.players.length<6 && (S.phase==='lobby' || (S.phase==='play' && !firstRoundDone()));
       if(canPlay){
         const err=nameEmojiTaken(d.name, d.emoji);
         if(err){ conn.send({t:'err', m:err, fatal:true, taken:takenInfo(), code:NET.code}); return setTimeout(()=>conn.close(),500); }
         p=addPlayer(d.name, d.emoji, d.token, conn.peer);
         if(S.phase==='play') joinMidGame(p);
         sysChat(`${p.emoji} ${p.name} entró ${S.phase==='play'?'a la partida':'a la sala'}.`);
+      } else if(isOwner){
+        why='👑 Entraste como dueño del juego: todos ven que estás mirando y podés chatear y hablar con ellos.';
+        ob={id:'o'+(++S.seq), name:(String(d.name||'').trim()||'Dueño').slice(0,16), emoji:'👑', token:d.token, peerId:conn.peer, conn:true, owner:true};
+        S.observers.push(ob); sysChat(`👑 ${ob.name} (dueño del juego) entró a mirar la partida.`);
       } else {
         why = S.phase==='lobby' || S.players.length>=6 ? 'La sala está llena (6 jugadores): entraste como observador 👀.'
             : S.phase==='over' ? 'La partida ya terminó: entraste como observador 👀.'
@@ -1463,7 +1660,7 @@ function hostOnClose(conn){
   delete NET.conns[pid];
   const ob=(S.observers||[]).find(x=>x.id===pid);
   if(S.handoff && (S.handoff.to===pid || S.handoff.from===pid)) S.handoff=null;   // la oferta de lugar se cae si alguno se va
-  if(ob){ ob.conn=false; S.observers=S.observers.filter(x=>x!==ob); sysChat(`👀 ${ob.name} dejó de mirar.`); commit(); return; }
+  if(ob){ ob.conn=false; S.observers=S.observers.filter(x=>x!==ob); sysChat(`${ob.owner?'👑':'👀'} ${ob.name}${ob.owner?' (dueño del juego)':''} dejó de mirar.`); commit(); return; }
   const p=P(pid); if(!p) return;
   if(S.phase==='lobby'){ S.players=S.players.filter(x=>x!==p); sysChat(`${p.name} salió de la sala.`); }
   else { p.conn=false; p.mic=false; p.offAt=Date.now(); sysChat(`${p.emoji} ${p.name} se desconectó.${p.bk?'':' El anfitrión puede esperarlo o sacarlo de la partida.'}`); }
@@ -1472,7 +1669,7 @@ function hostOnClose(conn){
 function addChat(pid, text){
   text=String(text||'').trim().slice(0,300); if(!text) return;
   const p=P(pid) || (S.observers||[]).find(x=>x.id===pid); if(!p) return;
-  const m={n:p.name+(p.id[0]==='o'?' (mirando)':''), e:p.emoji, c:p.color||'#666', x:text};
+  const m={n:p.name+(p.owner?' (dueño del juego)':p.id[0]==='o'?' (mirando)':''), e:p.emoji, c:p.color||'#666', x:text};
   pushChat(m);
 }
 function sysChat(x){ pushChat({sys:true, x}); }
@@ -1583,12 +1780,12 @@ function renderVoice(){
   const b=$('#btnMic'); b.textContent = VOICE.stream ? '🎤 Micrófono ACTIVO (tocá para apagar)' : '🎤 Activar micrófono';
   b.classList.toggle('mic-on', !!VOICE.stream); b.classList.toggle('gray', !VOICE.stream);
   $('#btnSpk').textContent = VOICE.muted ? '🔇' : '🔊';
-  $('#voiceBar').style.display = NET.mode==='local' ? 'none' : 'flex';   // los observadores también pueden escuchar y hablar
+  $('#voiceBar').style.display = NET.mode==='local' || NET.mode==='spy' ? 'none' : 'flex';   // los observadores también pueden escuchar y hablar
 }
 // botón del anfitrión para silenciar a quien tiene el micrófono abierto (jugador u observador)
 const muteBtn = x => NET.mode==='host' && x && x.mic && x.id!==NET.myPid
   ? `<button class="mutebtn" title="Silenciar el micrófono de ${esc(x.name)}" onclick="event.stopPropagation();doAct({type:'muteOther',id:'${x.id}'})">🔇 Silenciar</button>` : '';
-const obsName = o => esc(o.name)+(o.id===NET.obs?' (vos)':'')+(o.mic?' 🎤':'')+muteBtn(o);
+const obsName = o => (o.owner?'👑 ':'')+esc(o.name)+(o.owner?' (dueño del juego)':'')+(o.id===NET.obs?' (vos)':'')+(o.mic?' 🎤':'')+muteBtn(o);
 // ¿el anfitrión me silenció? (cada silenciada sube un contador; al entrar no cuenta lo viejo)
 function checkForcedMute(){
   if(NET.mode!=='client' || !S) return;
@@ -1631,7 +1828,7 @@ function renderLobby(){
   $('#btnAddBot').disabled = S.players.length>=6;
   $('#btnStart').style.display = isHost ? 'block' : 'none';
   $('#btnStart').disabled = S.players.length<2;
-  $('#lobbyWait').textContent = isHost ? (S.players.length<2?'Se necesitan al menos 2 jugadores.':'') : NET.obs ? '👀 La sala está llena: vas a mirar la partida como observador.' : 'Esperando que el anfitrión empiece la partida…';
+  $('#lobbyWait').textContent = isHost ? (S.players.length<2?'Se necesitan al menos 2 jugadores.':'') : NET.mode==='spy' ? '🕵️ Mirando la sala sin que te vean.' : NET.obs && (S.observers||[]).some(o=>o.id===NET.obs && o.owner) ? '👑 Estás mirando como dueño del juego.' : NET.obs ? '👀 La sala está llena: vas a mirar la partida como observador.' : 'Esperando que el anfitrión empiece la partida…';
 }
 
 function cellPos(i){
@@ -2391,6 +2588,7 @@ function renderLog(){
 }
 function sendChat(){
   const t=$('#chatText'), x=t.value.trim(); if(!x) return; t.value='';
+  if(NET.mode==='spy') return;
   if(NET.mode==='client'){ if(NET.hostConn&&NET.hostConn.open) NET.hostConn.send({t:'chat',text:x}); }
   else if(NET.mode==='host') addChat(NET.myPid, x);
   else if(S && S.players.length) addChat(cur().id, x);
@@ -2702,6 +2900,7 @@ function resumeClient(code){
   clientJoin(code);
 }
 function confirmLeave(){
+  if(NET.mode==='spy') return ownerSpyExit();
   const me=S && S.phase==='play' && meId() ? P(meId()) : null;
   const playing = me && !me.bk && !me.bot;
   const nextHost = NET.mode==='host' ? hostCandidates(S)[0] : null;   // quién queda de anfitrión si salgo
@@ -2807,7 +3006,8 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
 window.addEventListener('beforeunload', e=>{ if(NET.mode==='host' && S && S.phase==='play'){ e.preventDefault(); e.returnValue=''; } });
 const hashCode=location.hash.replace('#','').toUpperCase();
 if(/^[A-Z0-9]{5}$/.test(hashCode)) $('#joinCode').value=hashCode;
-refreshResume();
+refreshResume(); refreshOwnerBtn();
+if(location.hash==='#panel-dueno') openOwnerPanel();
 // si recargaste la página en medio de una partida en línea, volver a entrar solo
 const lastClient=load('bnq_client');
 if(lastClient && lastClient.code===hashCode && Date.now()-lastClient.at < 12*3600e3 && $('#myName').value.trim()) clientJoin(hashCode);
