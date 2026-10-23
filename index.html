@@ -1396,6 +1396,8 @@ function buildBoard(){
     b.appendChild(el);
   }
   const ctr=document.createElement('div'); ctr.id='center'; b.appendChild(ctr);
+  // marca de agua: sello en homenaje al Banco Central del Paraguay (dibujo propio, no es el logo oficial)
+  ctr.style.background=`url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(BCP_SVG)}") center/82% no-repeat, linear-gradient(135deg,#e8f3e9,#d7ead9)`;
   const dl=document.createElement('div'); dl.id='diceLayer'; b.appendChild(dl);
 }
 
@@ -1495,6 +1497,21 @@ function renderTokens(){
     $('#c'+pos+' .toks').appendChild(el);
   }
 }
+// sello del centro del tablero (marca de agua, muy tenue)
+const BCP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><g opacity=".13" fill="none" stroke="#0b3d2e">
+  <circle cx="200" cy="200" r="190" stroke-width="6"/><circle cx="200" cy="200" r="178" stroke-width="2"/><circle cx="200" cy="200" r="128" stroke-width="2"/>
+  <defs><path id="arcTop" d="M 48 200 A 152 152 0 0 1 352 200"/><path id="arcBot" d="M 56 200 A 144 144 0 0 0 344 200"/></defs>
+  <text font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="21" fill="#0b3d2e" stroke="none" letter-spacing="1" text-anchor="middle"><textPath href="#arcTop" startOffset="50%">BANCO CENTRAL DEL PARAGUAY</textPath></text>
+  <text font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="22" fill="#0b3d2e" stroke="none" letter-spacing="6" text-anchor="middle" dominant-baseline="hanging"><textPath href="#arcBot" startOffset="50%">★ ASUNCIÓN ★</textPath></text>
+  <g fill="#0b3d2e" stroke="none">
+    <path d="M200 92 L292 140 H108 Z"/>
+    <rect x="112" y="144" width="176" height="10"/>
+    ${[124,152,180,208,236,264].map(x=>`<rect x="${x}" y="160" width="12" height="70" rx="2"/>`).join('')}
+    <rect x="108" y="232" width="184" height="10"/><rect x="98" y="246" width="204" height="10"/><rect x="88" y="260" width="224" height="10"/>
+  </g>
+  <path d="M200 104 l4.7 9.6 10.6 1.5-7.7 7.5 1.8 10.5-9.4-5-9.4 5 1.8-10.5-7.7-7.5 10.6-1.5z" fill="#f6f1e1" stroke="none"/>
+  <text x="200" y="314" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="40" fill="#0b3d2e" stroke="none" text-anchor="middle">₲</text>
+</g></svg>`;
 // casita verde (techo a dos aguas, chimenea, puerta y ventanas) y hotel rojo de varios pisos
 const HOUSE_SVG = cls => `<svg class="${cls}" viewBox="0 0 20 20"><rect x="13.4" y="2.6" width="2.6" height="5.5" fill="#6b3a1f" stroke="#3b1d0c" stroke-width=".7"/>
   <rect x="3.6" y="9" width="12.8" height="9.6" fill="#36c55a" stroke="#0b4f1c" stroke-width="1"/>
@@ -2153,7 +2170,8 @@ function showRules(){
   <h4>Hipotecas y deudas</h4><ul><li>Podés hipotecar por la mitad del precio (sin casas en el grupo). Levantarla cuesta la hipoteca + 10%.</li>
   <li>Vender casas devuelve la mitad de su costo.</li><li>Si quedás con saldo negativo, no podés seguir hasta conseguir dinero. Si no podés, quebrás y tus bienes pasan a tu acreedor.</li></ul>
   <h4>Negocios</h4><p>Con “🤝 Negociar” podés ofrecer dinero y propiedades a otro jugador. Usá el chat o el micrófono para regatear.</p>
-  <h4>Jugar en línea</h4><p>Uno crea la sala y pasa el código. Funciona entre redes distintas (wifi, datos móviles). Si alguien se desconecta, vuelve a entrar con el mismo código desde el mismo dispositivo y recupera su lugar.</p></div>`,'rules');
+  <h4>Jugar en línea</h4><p>Uno crea la sala y pasa el código. Funciona entre redes distintas (wifi, datos móviles). Si alguien se desconecta, vuelve a entrar con el mismo código desde el mismo dispositivo y recupera su lugar.</p>
+  <p class="muted" style="margin-top:14px">El sello del centro del tablero es un homenaje al Banco Central del Paraguay. Es un juego de entretenimiento sin relación oficial con el BCP.</p></div>`,'rules');
 }
 
 function leaveToMenu(){
