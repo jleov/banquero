@@ -349,6 +349,7 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
       <button class="btn green wide" id="btnInstall">📲 Instalar en este dispositivo</button>
     </div>
     <button class="btn gray wide" onclick="showRules()">📜 Reglas del juego</button>
+    <p class="muted" id="musicCredit" style="color:#cfe8d5;text-align:center;font-size:11px;margin-top:14px"></p>
   </div>
 </div>
 
@@ -1628,7 +1629,9 @@ function moneySounds(){
   if(cuenta){ SFX.counter(); lastMoneySound=Date.now(); }
   if(caja){ SFX.register(cuenta ? 1.25 : 0); lastMoneySound=Date.now(); }   // si hubo conteo, la caja suena después
 }
-// ---- música de fondo: arpa en tres tiempos, en bucle, al 25% del volumen de los efectos ----
+// ---- música de fondo: "Monkeys Spinning Monkeys" (Kevin MacLeod), en bucle, al 25% del volumen de los efectos ----
+// La licencia (Creative Commons Atribución 4.0) pide mostrar este crédito: aparece en Reglas y al pie del menú.
+const MUSIC_CREDIT = 'Música: "Monkeys Spinning Monkeys" de Kevin MacLeod (incompetech.com). Licencia Creative Commons Atribución 4.0: creativecommons.org/licenses/by/4.0/';
 const MUSIC = { on: load('bnq_music')!==false, buf:null, src:null, gain:null, loading:false, VOL:.1 };
 function musicLoad(){
   if(MUSIC.buf || MUSIC.loading) return Promise.resolve(); MUSIC.loading=true;
@@ -1655,7 +1658,7 @@ function toggleMusic(){ MUSIC.on=!MUSIC.on; store('bnq_music', MUSIC.on); musicS
 function renderMusicBtn(){ document.querySelectorAll('.btnMusic').forEach(b=>{ b.textContent = MUSIC.on ? '🎶' : '🔕'; b.title = MUSIC.on ? 'Apagar la música de fondo' : 'Prender la música de fondo'; }); }
 function toggleSfx(){ SFX.on=!SFX.on; store('bnq_sfx',SFX.on); renderSfxBtn(); if(SFX.on) SFX.coins(); }
 function renderSfxBtn(){ const b=$('#btnSfx'); b.textContent=SFX.on?'🎵':'🔇'; b.title=SFX.on?'Apagar sonidos del juego':'Prender sonidos del juego'; }
-renderSfxBtn(); renderMusicBtn();
+renderSfxBtn(); renderMusicBtn(); $('#musicCredit').textContent='🎶 '+MUSIC_CREDIT;
 
 function renderTokens(){
   document.querySelectorAll('.toks').forEach(t=>t.innerHTML='');
@@ -2488,7 +2491,8 @@ function showRules(){
   <li>Vender casas devuelve la mitad de su costo.</li><li>Si quedás con saldo negativo, no podés seguir hasta conseguir dinero. Si no podés, quebrás y tus bienes pasan a tu acreedor.</li></ul>
   <h4>Negocios</h4><p>Con “🤝 Negociar” podés ofrecer dinero y propiedades a otro jugador. Usá el chat o el micrófono para regatear.</p>
   <h4>Jugar en línea</h4><p>Uno crea la sala y pasa el código. Funciona entre redes distintas (wifi, datos móviles). Si alguien se desconecta, vuelve a entrar con el mismo código desde el mismo dispositivo y recupera su lugar.</p>
-  <p class="muted" style="margin-top:14px">El sello del centro del tablero es un homenaje al Banco Central del Paraguay. Es un juego de entretenimiento sin relación oficial con el BCP.</p></div>`,'rules');
+  <p class="muted" style="margin-top:14px">El sello del centro del tablero es un homenaje al Banco Central del Paraguay. Es un juego de entretenimiento sin relación oficial con el BCP.</p>
+  <p class="muted">🎶 ${MUSIC_CREDIT}</p></div>`,'rules');
 }
 
 function leaveToMenu(){

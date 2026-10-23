@@ -1,6 +1,6 @@
 // Service worker mínimo: permite instalar el juego como app en Android.
 // Guarda el juego en caché para que abra rápido; la partida en línea siempre necesita internet.
-const CACHE = 'banquero-v6';
+const CACHE = 'banquero-v7';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './peerjs.min.js', './dados.mp3', './contadora.mp3', './caja.mp3', './musica.mp3'];
 
 self.addEventListener('install', e => {
