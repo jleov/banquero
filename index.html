@@ -243,9 +243,8 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
       <div class="tokens" id="myTokens"></div>
     </div>
     <div class="box" id="resumeBox" style="display:none">
-      <h3>Partida guardada</h3>
-      <p class="muted" id="resumeInfo"></p>
-      <button class="btn green wide" id="btnResume">▶ Reanudar como anfitrión</button>
+      <h3>▶ Volver a tu partida</h3>
+      <div id="resumeList"></div>
     </div>
     <div class="box">
       <h3>🌐 Jugar en línea con amigos</h3>
@@ -284,6 +283,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
       <button class="btn gray wide" id="btnAddBot" style="margin-bottom:8px">🤖 Agregar un bot</button>
       <button class="btn red wide" id="btnStart">🎲 Empezar partida</button>
       <p class="muted" id="lobbyWait" style="text-align:center"></p>
+      <button class="btn gray wide" onclick="confirmLeave()">🏠 Volver al inicio</button>
     </div>
     <div class="box" id="lobbyComm" style="height:380px;display:flex;flex-direction:column"></div>
   </div>
@@ -302,6 +302,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
           <button class="btn sm gold" onclick="showTrade()">🤝 Negociar</button>
           <button class="btn sm gray" onclick="showRules()">📜 Reglas</button>
           <button class="btn sm gray" id="btnSfx" style="flex:0 0 auto" onclick="toggleSfx()" title="Sonidos del juego">🎵</button>
+          <button class="btn sm red" style="flex:0 0 auto" onclick="confirmLeave()" title="Volver al inicio">🏠 Inicio</button>
         </div>
         <div class="trades" id="trades"></div>
         <div class="wallet" id="wallet"></div>
@@ -1877,6 +1878,10 @@ function leaveToMenu(){
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
   PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null;
+  // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
+  [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
+  prevOwned=prevHouses=null; prevWallet={pid:null, bills:null}; shownRoll=-1; lastTurnPid=null;
+  diceEndAt=uiHoldUntil=rollingUntil=0; clearTimeout(holdTimer); lastLogSeq=-1;
   $('#board').innerHTML=''; $('#cardRoot').innerHTML=''; $('#cardRoot').dataset.id=''; netBar(false); show('menu'); refreshResume();
 }
 
@@ -1904,11 +1909,37 @@ function startVsBots(){
   localNames.splice(0, localNames.length, {n:myName(), bot:false}, {n:BOT_NAMES[0],bot:true}, {n:BOT_NAMES[1],bot:true}, {n:BOT_NAMES[2],bot:true});
   renderLocalNames(); startLocal();
 }
+// partidas que se pueden retomar: como anfitrión, como invitado o en este dispositivo
 function refreshResume(){
+  const items=[], recent=(x,h)=>x && Date.now()-x.at < h*3600e3;
+  const names=s=>s.players.map(p=>(p.bot?'🤖':'')+p.name).join(', ');
   const h=load('bnq_host');
-  const ok = h && h.S && h.S.phase==='play' && Date.now()-h.at < 3*24*3600e3;
-  $('#resumeBox').style.display = ok ? 'block' : 'none';
-  if(ok) $('#resumeInfo').textContent = `Sala ${h.code} · ${h.S.players.map(p=>p.name).join(', ')}`;
+  if(recent(h,72) && h.S && h.S.phase==='play') items.push(`<p class="muted" style="margin:0 0 6px">🌐 Sala <b>${h.code}</b> (vos sos el anfitrión) · ${esc(names(h.S))}</p>
+    <button class="btn green wide" onclick="hostStart(true)">▶ Reanudar como anfitrión</button>`);
+  const c=load('bnq_client');
+  if(recent(c,12) && c.code && !(h && h.code===c.code)) items.push(`<p class="muted" style="margin:10px 0 6px">🌐 Sala <b>${c.code}</b> de un amigo</p>
+    <button class="btn green wide" onclick="resumeClient('${c.code}')">▶ Volver a la sala ${c.code}</button>`);
+  const l=load('bnq_local');
+  if(recent(l,72) && l.S && l.S.phase==='play') items.push(`<p class="muted" style="margin:10px 0 6px">📱 En este dispositivo · ${esc(names(l.S))}</p>
+    <button class="btn green wide" onclick="resumeLocal()">▶ Continuar partida</button>`);
+  $('#resumeBox').style.display = items.length ? 'block' : 'none';
+  $('#resumeList').innerHTML = items.join('');
+}
+function resumeLocal(){
+  const l=load('bnq_local'); if(!l||!l.S) return;
+  NET.mode='local'; S=l.S; CHAT=[]; renderChat(); commit();
+}
+function resumeClient(code){
+  if(!$('#myName').value.trim()) return toast('Escribí tu nombre primero.');
+  if(location.hash!=='#'+code) history.replaceState(null,'','#'+code);
+  clientJoin(code);
+}
+function confirmLeave(){
+  const msg = NET.mode==='host' && S.phase!=='lobby' ? 'La partida queda guardada en este dispositivo. Tus amigos quedan esperando hasta que vuelvas con “Reanudar como anfitrión”.'
+    : NET.mode==='host' ? 'Se cierra la sala y tus amigos salen de ella.'
+    : NET.mode==='client' ? 'Salís de la sala. Podés volver con “Volver a la sala” y recuperás tu lugar.'
+    : 'La partida queda guardada. Podés seguirla con “Continuar partida”.';
+  modal(`<h3>🏠 ¿Volver al inicio?</h3><p>${msg}</p><button class="btn red wide" onclick="closeModal();leaveToMenu()">Sí, volver al inicio</button>`,'leave');
 }
 
 $('#myName').value = load('bnq_name') || '';
@@ -1919,7 +1950,6 @@ $('#btnAddLocal').onclick=()=>{ if(localNames.length<6){ localNames.push({n:'Jug
 $('#btnVsBots').onclick=startVsBots;
 $('#btnLocal').onclick=startLocal;
 $('#btnHost').onclick=()=>{ if(!$('#myName').value.trim()) return toast('Escribí tu nombre primero.'); hostStart(false); };
-$('#btnResume').onclick=()=>hostStart(true);
 $('#btnJoin').onclick=()=>{
   const code=$('#joinCode').value.trim().toUpperCase();
   if(!$('#myName').value.trim()) return toast('Escribí tu nombre primero.');
