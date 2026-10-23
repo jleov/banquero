@@ -765,7 +765,7 @@ function showBuyTitle(refresh){
   if(S.tp!=='buy' || S.pendingBuy==null){ if(refresh) closeModal(); return; }
   const i=S.pendingBuy, p=cur(), sp=B[i], mine=canAct(p.id);
   let h=`<h3>🃏 ${mine?'¿Comprás este título?':esc(p.name)+' está por decidir'}</h3><div style="max-width:260px;margin:0 auto 10px">${titleCard(i)}</div>`;
-  if(mine) h+=`<div class="row"><button class="btn green" ${p.money<sp.p*K?'disabled':''} onclick="closeModal();doAct({type:'buy'})">Comprar ${fmt(sp.p*K)}</button><button class="btn gray" onclick="closeModal();doAct({type:'skip'})">No comprar</button></div>
+  if(mine) h+=`<div class="row"><button class="btn green" ${p.money<sp.p*K?'disabled':''} onclick="closeModal();showBuyPicker()">Comprar ${fmt(sp.p*K)}</button><button class="btn gray" onclick="closeModal();doAct({type:'skip'})">No comprar</button></div>
     <button class="btn wide" style="margin-top:8px;background:#2a9d3f" onclick="showTitles('mine')">Ver mis títulos</button>`;
   modal(h,'buy',i);
 }
@@ -1043,6 +1043,15 @@ function act(pid, a){
       if(!turn||S.tp!=='buy') return;
       const idx=S.pendingBuy, price=B[idx].p*K;
       if(p.money<price) return 'No te alcanza el dinero.';
+      if(a.bills && p.bills){   // eligió con qué billetes pagar: el Banco le da el vuelto
+        const sel=cleanSel(a.bills); if(!sel) return 'Billetes inválidos.';
+        for(const v in sel) if(sel[v]>(p.bills[v]||0)) return 'No tenés esos billetes.';
+        const tot=billTotal(sel); if(tot<price) return `Faltan ${fmt(price-tot)}.`;
+        const minV=Math.min(...Object.keys(sel).filter(v=>sel[v]>0).map(Number));
+        if(tot-minV>=price) return 'Estás dando billetes de más: sacá alguno.';
+        takeBills(p, sel); addBills(p, tot-price); p.money-=price; S.props[idx]={o:p.id,h:0,m:false};
+        log(`🏷️ ${p.name} compra ${B[idx].n} por ${fmt(price)}: entrega ${billText(sel)}${tot>price?` y el Banco le da ${fmt(tot-price)} de vuelto`:''}.`); afterMove(p); break;
+      }
       p.money-=price; S.props[idx]={o:p.id,h:0,m:false};
       log(`🏷️ ${p.name} compra ${B[idx].n} por ${fmt(price)}.`); afterMove(p); break;
     }
@@ -2270,7 +2279,9 @@ function renderGame(){
   // alquiler en mano: abrir solo la ventana de billetes al que le toca actuar
   if(m.dataset.kind==='bank') showBank(true);
   if(m.dataset.kind==='rentpick') showRentPicker(true);
-  if(!S.rent){ PICK={key:null, sel:{}, exch:false}; openedRent=null; }   // transacción cerrada: no queda nada guardado
+  if(m.dataset.kind==='buypick') showBuyPicker(true);
+  const buying = PICK.buy && S.tp==='buy';   // eligiendo billetes para comprar un terreno
+  if(!S.rent && !buying){ PICK={key:null, sel:{}, exch:false}; openedRent=null; }   // transacción cerrada: no queda nada guardado
   else if(S.rent){ const R=S.rent, key=R.id+':'+R.stage; if(key!==openedRent && canAct(R.stage==='pay'?R.from:R.to)){ openedRent=key; showRentPicker(); } }
   if(S.rent && S.rent.stage==='change'){ clearTimeout(rentTimer); rentTimer=setTimeout(()=>{ if(S&&S.rent) renderCenter(); }, 31000-(Date.now()-S.rent.at)); }
 }
@@ -2440,12 +2451,47 @@ function showRentPicker(refresh){
     <button class="btn ${PICK.exch?'red':'gold'} wide" style="margin-top:8px" onclick="PICK.exch=!PICK.exch;showRentPicker(true)">${PICK.exch?'Cancelar cambio':'🏦 Cambiar un billete en el Banco'}</button>`;
   modal(h,'rentpick');
 }
+// comprar un terreno al Banco: elegir con qué billetes pagar (el Banco da el vuelto)
+function showBuyPicker(refresh){
+  const r=$('#modalRoot');
+  if(refresh && r.dataset.kind!=='buypick') return;
+  const p = S && S.phase==='play' ? cur() : null;
+  if(!p || S.tp!=='buy' || !canAct(p.id)){ if(r.dataset.kind==='buypick') closeModal(); return; }
+  const idx=S.pendingBuy, sp=B[idx], price=sp.p*K, key='buy:'+S.rollId+':'+idx;
+  if(PICK.key!==key) PICK={key, sel:{}, exch:false, buy:true};
+  const bills=p.bills||{}, sel=PICK.sel, tot=billTotal(sel);
+  const avail=BILLS.filter(b=>(bills[b.v]||0)-(sel[b.v]||0)>0);
+  let h=`<h3>🏷️ Comprar ${esc(sp.n)}</h3><p>${NET.mode==='local'?`<b>${esc(p.name)}</b>, pagale`:'Pagale'} al <b>🏦 Banco</b>: <b style="font-size:1.2em">${fmt(price)}</b><br><span class="muted">Si das de más, el Banco te da el vuelto.</span></p>
+    <div class="plabel">${PICK.exch?'🏦 Tocá el billete que querés cambiar en el Banco:':'Tus billetes — tocá para entregar:'}</div>
+    <div class="bills pickrow ${PICK.exch?'exch':''}">${avail.map(b=>billChip(b.v,(bills[b.v]||0)-(sel[b.v]||0),`pickBill(${b.v})`,'pickable')).join('')||'<span class="muted">No te quedan billetes</span>'}</div>
+    <div class="plabel">Billetes que entregás: <b>${fmt(tot)}</b></div>
+    <div class="bills pickrow given">${BILLS.filter(b=>sel[b.v]).map(b=>billChip(b.v,sel[b.v],`unpickBill(${b.v})`,'pickable')).join('')||'<span class="muted">Todavía nada</span>'}</div>`;
+  let ok=false, msg;
+  const minV=Math.min(...Object.keys(sel).filter(v=>sel[v]>0).map(Number));
+  if(tot<price) msg=`Faltan <b>${fmt(price-tot)}</b>`;
+  else if(tot-minV>=price) msg='Estás dando billetes de más: tocá alguno para sacarlo.';
+  else { ok=true; msg = tot===price ? '✔ Justo, sin vuelto' : `✔ El Banco te da <b>${fmt(tot-price)}</b> de vuelto`; }
+  h+=`<div class="pmsg ${ok?'ok':''}">${msg}</div>
+    <div class="row"><button class="btn green" ${ok?'':'disabled'} onclick="confirmBuyPick()">Entregar y comprar</button>
+      <button class="btn gray" onclick="closeModal();doAct({type:'buy'})">Pagar automático</button></div>
+    <button class="btn ${PICK.exch?'red':'gold'} wide" style="margin-top:8px" onclick="PICK.exch=!PICK.exch;showBuyPicker(true)">${PICK.exch?'Cancelar cambio':'🏦 Cambiar un billete en el Banco'}</button>`;
+  modal(h,'buypick');
+}
+function confirmBuyPick(){
+  if(!S || S.tp!=='buy') return;
+  const sel=PICK.sel; PICK={key:null, sel:{}, exch:false};
+  closeModal(); doAct({type:'buy', bills:sel}, cur().id);
+}
 function pickBill(v){
+  if(PICK.buy){
+    if(PICK.exch){ PICK.exch=false; doAct({type:'exchange', v}, cur().id); return; }
+    PICK.sel[v]=(PICK.sel[v]||0)+1; SFX.pay(); showBuyPicker(true); return;
+  }
   const R=S.rent; if(!R) return; const actorId=R.stage==='pay'?R.from:R.to;
   if(PICK.exch){ PICK.exch=false; doAct({type:'exchange', v}, actorId); return; }
   PICK.sel[v]=(PICK.sel[v]||0)+1; SFX.pay(); showRentPicker(true);
 }
-function unpickBill(v){ if(PICK.sel[v]){ PICK.sel[v]--; if(!PICK.sel[v]) delete PICK.sel[v]; } showRentPicker(true); }
+function unpickBill(v){ if(PICK.sel[v]){ PICK.sel[v]--; if(!PICK.sel[v]) delete PICK.sel[v]; } if(PICK.buy) showBuyPicker(true); else showRentPicker(true); }
 function confirmPick(){
   const R=S.rent; if(!R) return; const paying=R.stage==='pay';
   const sel=PICK.sel; PICK.sel={};   // lo entregado ya no queda seleccionado
@@ -2520,7 +2566,7 @@ function renderCenterInner(){
       const i=S.pendingBuy, sp=B[i], gh=groupHave(p.id,i);
       h+=`<div class="pcard"><div class="bar" style="background:${sp.g?GROUPS[sp.g].c:'#999'}"></div><b>${sp.ic||''} ${sp.n}</b><br>Precio: <b>${fmt(sp.p*K)}</b>
         <div style="font-size:.9em">Cobrarías: <b>${rentIfBought(p.id,i)}</b><br><span class="muted">${gh.text}</span></div></div>`;
-      acts.push(`<button class="btn green" onclick="doAct({type:'buy'})" ${p.money<sp.p*K?'disabled':''}>Comprar</button>`,
+      acts.push(`<button class="btn green" onclick="showBuyPicker()" ${p.money<sp.p*K?'disabled':''}>Comprar</button>`,
                 `<button class="btn gray" onclick="doAct({type:'skip'})">No comprar</button>`,
                 `<button class="btn gold" onclick="showBuyTitle()">🃏 Ver título</button>`);
     } else if(S.tp==='end'){
