@@ -197,13 +197,15 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
 .bills{display:flex;flex-wrap:wrap;gap:8px 10px}
-.bill{position:relative;width:76px;height:38px;border-radius:5px;background:linear-gradient(135deg,var(--bc),color-mix(in srgb,var(--bc) 70%,#fff));
+.bill{position:relative;width:86px;height:40px;border-radius:5px;
+  background:repeating-radial-gradient(circle at 78% 50%,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),linear-gradient(135deg,var(--bc),color-mix(in srgb,var(--bc) 70%,#fff));
   border:2px solid #fff;outline:1px solid var(--bc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;text-shadow:0 1px 1px rgba(0,0,0,.4)}
 .bill.stack{box-shadow:3px 3px 0 -1px #fff,3px 3px 0 0 var(--bc),6px 6px 0 -1px #fff,6px 6px 0 0 var(--bc)}
-.bill .bseal{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.3);font-size:10px;display:flex;align-items:center;justify-content:center}
-.bill .bv{margin-left:13px;font-size:12px;letter-spacing:-.2px}
+.bill .bpic{position:absolute;left:3px;top:3px;width:26px;height:30px;border-radius:50%;background:radial-gradient(#fff,color-mix(in srgb,var(--bc) 25%,#fff));color:color-mix(in srgb,var(--bc) 55%,#000);box-shadow:0 0 0 1px rgba(255,255,255,.7)}
+.bill .bv{margin-left:28px;font-size:12px;letter-spacing:-.2px}
 .bill.coin{width:42px;height:42px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3b0,#d8b13e 45%,#8f6d14);color:#4a3606;text-shadow:0 1px 0 rgba(255,255,255,.5);outline-color:#8f6d14}
-.bill.coin .bseal{display:none}.bill.coin .bv{margin:0;font-size:11px}
+.bill.coin{flex-direction:column;justify-content:flex-start;padding-top:2px}
+.bill.coin .bpic{position:static;width:20px;height:22px;background:none;box-shadow:none;color:#6b4d0c}.bill.coin .bv{margin:-2px 0 0;font-size:9px}
 .bill.coin.stack{box-shadow:2px 3px 0 -1px #fff,2px 3px 0 0 #8f6d14,4px 6px 0 -1px #fff,4px 6px 0 0 #8f6d14}
 .bill .bn{position:absolute;right:-8px;top:-9px;background:#222;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;text-shadow:none;border:2px solid #fff}
 .bill.pop{animation:billpop .6s}
@@ -299,6 +301,9 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:80;max-width:90vw;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.5)}
 .netbar{position:fixed;top:0;left:0;right:0;background:var(--red);color:#fff;text-align:center;font-size:13px;padding:4px;z-index:70;display:none}
 .rules h4{margin:12px 0 4px}.rules p,.rules li{font-size:14px;line-height:1.4}
+/* firma del creador, chiquitita al pie de la pantalla */
+#firma{position:fixed;right:8px;bottom:3px;z-index:5;font-size:10px;color:rgba(255,255,255,.55);letter-spacing:.3px;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.45);font-family:inherit}
+#firma b{color:rgba(241,196,15,.8);font-weight:800}
 /* panel del dueño: mirar sin que te vean */
 #spyBar{display:none;position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:60;background:#4a2f7a;color:#fff;padding:6px 8px 6px 14px;border-radius:20px;font-size:13px;box-shadow:0 3px 10px #0005;align-items:center;gap:8px;white-space:nowrap;max-width:calc(100vw - 16px)}
 body.spy #spyBar{display:flex}
@@ -441,6 +446,29 @@ body.spy #voiceBar, body.spy .tabs [data-tab=chat], body.spy #feedChat, body.spy
   <div class="feed" id="feedLog" style="display:none"></div>
   <div class="chatin"><input type="text" id="chatText" maxlength="300" placeholder="Escribí un mensaje…"><button class="btn sm" id="btnSend">Enviar</button></div>
 </div>
+
+<!-- el banquero de los billetes (dibujo propio): toma el color de cada billete -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="banquero" viewBox="0 0 40 44">
+    <path d="M5 44c1.5-8 7-11.5 15-11.8 8 .3 13.5 3.8 15 11.8z" fill="currentColor"/>
+    <path d="M15.5 32.6 20 38l4.5-5.4" fill="#fff" fill-opacity=".9"/>
+    <path d="m16.4 36.2 3.6 1.6-3.6 1.8zm7.2 0-3.6 1.6 3.6 1.8z" fill="#e2b33c"/>
+    <circle cx="20" cy="37.8" r=".9" fill="#e2b33c"/>
+    <ellipse cx="20" cy="22.5" rx="7.6" ry="8.6" fill="#fff" fill-opacity=".92" stroke="currentColor" stroke-width="1.3"/>
+    <path d="M12.6 19.5c-1.6.3-1.8 3.6-.2 4.1m15-4.1c1.6.3 1.8 3.6.2 4.1" fill="none" stroke="currentColor" stroke-width="1.1"/>
+    <circle cx="16.8" cy="20.6" r="1.05" fill="currentColor"/><circle cx="23.2" cy="20.6" r="1.05" fill="currentColor"/>
+    <path d="M15.2 18.4q1.6-1 3 0m3.6 0q1.6-1 3 0" fill="none" stroke="currentColor" stroke-width=".8"/>
+    <circle cx="23.2" cy="20.6" r="2.5" fill="none" stroke="currentColor" stroke-width=".8"/>
+    <path d="M25.6 21.4q2.6 3 1.6 7.4" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 .7"/>
+    <path d="M20 22.6v1.8" stroke="currentColor" stroke-width=".8"/>
+    <path d="M12.8 26.6q3.5-3.1 7.2-.9 3.7-2.2 7.2.9-3.6 1.6-7.2.1-3.6 1.5-7.2-.1z" fill="currentColor"/>
+    <path d="M17.6 28.9q2.4 1.1 4.8 0" fill="none" stroke="currentColor" stroke-width=".7"/>
+    <rect x="12.5" y="1.5" width="15" height="12.5" rx="1.2" fill="currentColor"/>
+    <rect x="12.5" y="10" width="15" height="2.2" fill="#fff" fill-opacity=".55"/>
+    <rect x="8" y="13.2" width="24" height="3" rx="1.5" fill="currentColor"/>
+  </symbol>
+</svg>
+<div id="firma" title="Banquero Paraguayo es un juego creado por jleovgames">un juego de <b>jleovgames</b>™</div>
 
 <div id="modalRoot"></div>
 <div id="cardRoot"></div>
@@ -595,7 +623,10 @@ const unmortCost = i => Math.ceil(B[i].p*K/2*1.1/1000)*1000;   // redondeado a l
 
 // billetes de guaraníes (los de verdad: 100.000, 50.000, 20.000, 10.000, 5.000 y 2.000)
 // + la moneda de ₲ 1.000, que hace falta para poder dar cualquier vuelto (por ejemplo ₲ 3.000)
-const BILLS=[{v:100000,c:'#1e8a5a'},{v:50000,c:'#c0392b'},{v:20000,c:'#1f5fb0'},{v:10000,c:'#8e2a52'},{v:5000,c:'#7d3c98'},{v:2000,c:'#d6589f'},{v:1000,c:'#b8962e',coin:true}];
+// colores como los billetes reales: 100.000 verde, 50.000 violeta, 20.000 azul, 10.000 rojo granate, 5.000 naranja, 2.000 rosado; la moneda de 1.000 dorada
+const BILLS=[{v:100000,c:'#21875a'},{v:50000,c:'#7a4b9c'},{v:20000,c:'#1f5fb0'},{v:10000,c:'#a8322d'},{v:5000,c:'#d4702a'},{v:2000,c:'#d6589f'},{v:1000,c:'#b8962e',coin:true}];
+// el banquero (dibujo propio) que va en cada billete y en la moneda
+const BANKER_PIC='<svg class="bpic" viewBox="0 0 40 44" aria-hidden="true"><use href="#banquero"/></svg>';
 const BILL_START={1000:2,2000:4,5000:4,10000:5,20000:6,50000:6};   // billetes chicos que se guardan para dar vuelto; el resto en billetes de 100.000
 const isCoin = v => +v===1000;
 function billsOf(amount){
@@ -664,7 +695,7 @@ function walletHTML(p){
   if(p.money<0) return `<div class="muted" style="color:var(--red)">Sin billetes: debe ${fmt(-p.money)} al Banco.</div>`;
   const bl=p.bills || billsOf(p.money);
   const items=BILLS.filter(b=>bl[b.v]>0).map(b=>`<div class="bill ${bl[b.v]>1?'stack':''} ${b.coin?'coin':''}" style="--bc:${b.c}" data-v="${b.v}" title="${bl[b.v]} ${b.coin?'moneda(s)':'billete(s)'} de ${fmt(b.v)}">
-    <span class="bseal">₲</span><span class="bv">${billLabel(b.v)}</span><span class="bn">×${bl[b.v]}</span></div>`).join('');
+    ${BANKER_PIC}<span class="bv">${billLabel(b.v)}</span><span class="bn">×${bl[b.v]}</span></div>`).join('');
   const cards=(p.jcards||[]).map(d=>`<div class="jcard ${d}" title="Usala cuando estés preso o vendela con 🤝 Negociar">🎫 Salga libre<small>de Tacumbú</small></div>`).join('');
   return `<div class="bills">${items||'<span class="muted">Sin billetes</span>'}${cards}</div>`;
 }
@@ -2373,7 +2404,7 @@ setInterval(()=>{   // revisar cada 5 segundos si alguien se quedó colgado
 // --- pagar con billetes y dar vuelto ---
 let openedRent=null, rentTimer=null, PICK={key:null, sel:{}, exch:false};
 function billChip(v, n, onclick, cls){
-  return `<div class="bill ${n>1?'stack':''} ${isCoin(v)?'coin':''} ${cls||''}" style="--bc:${BILL_COLOR[v]}" ${onclick?`onclick="${onclick}"`:''}><span class="bseal">₲</span><span class="bv">${billLabel(v)}</span><span class="bn">×${n}</span></div>`;
+  return `<div class="bill ${n>1?'stack':''} ${isCoin(v)?'coin':''} ${cls||''}" style="--bc:${BILL_COLOR[v]}" ${onclick?`onclick="${onclick}"`:''}>${BANKER_PIC}<span class="bv">${billLabel(v)}</span><span class="bn">×${n}</span></div>`;
 }
 function showRentPicker(refresh){
   const r=$('#modalRoot'), R=S && S.rent;
@@ -2842,7 +2873,8 @@ function showRules(){
   <h4>Negocios</h4><p>Con “🤝 Negociar” podés ofrecer dinero y propiedades a otro jugador. Usá el chat o el micrófono para regatear.</p>
   <h4>Jugar en línea</h4><p>Uno crea la sala y pasa el código. Funciona entre redes distintas (wifi, datos móviles). Si alguien se desconecta, vuelve a entrar con el mismo código desde el mismo dispositivo y recupera su lugar.</p>
   <p class="muted" style="margin-top:14px">El sello del centro del tablero es un homenaje al Banco Central del Paraguay. Es un juego de entretenimiento sin relación oficial con el BCP.</p>
-  <p class="muted">🎶 ${MUSIC_CREDIT}</p></div>`,'rules');
+  <p class="muted">🎶 ${MUSIC_CREDIT}</p>
+  <p class="muted">🎩 Banquero Paraguayo es un juego creado por <b>jleovgames</b>™. © ${new Date().getFullYear()} jleovgames.</p></div>`,'rules');
 }
 
 function leaveToMenu(){
