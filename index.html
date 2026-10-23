@@ -1674,14 +1674,15 @@ function animateDice(r){
       {transform:'translate(0,0) rotateZ(0deg) rotateY(0deg)'},{transform:'translate(-3px,-6px) rotateZ(-12deg) rotateY(40deg)'},{transform:'translate(4px,-3px) rotateZ(10deg) rotateY(90deg)'},
       {transform:'translate(-4px,-7px) rotateZ(-13deg) rotateY(140deg)'},{transform:'translate(3px,-3px) rotateZ(11deg) rotateY(200deg)'},{transform:'translate(-2px,-6px) rotateZ(-8deg) rotateY(260deg)'},
       {transform:'translate(0,0) rotateZ(0deg) rotateY(360deg)'}], {duration:750, easing:'ease-in-out'});
-    // 2) volcarlo sobre el borde de abajo: queda acostado encima de la mesa. Para irse se levanta y se achica
-    //    (sin transparencia: la transparencia aplastaría el 3D)
+    // 2) volcarlo sobre el borde de abajo: queda acostado encima de la mesa y después se desvanece.
+    //    La transparencia se aplica a cada cara por separado: hacer transparente el vaso entero lo aplastaría (dejaría de ser 3D)
     setTimeout(()=>{
       cup.style.transformOrigin=`${cupW}px ${cupH}px`;
-      cup.animate([{transform:'translateY(0) rotateZ(0deg) scale(1)'},{transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.22},
-        {transform:'translateY(0) rotateZ(84deg) scale(1)',offset:.3},{transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.38},
-        {transform:'translateY(0) rotateZ(90deg) scale(1)',offset:.7},{transform:`translateY(${-cupH*1.4}px) rotateZ(70deg) scale(.01)`}],
-        {duration:1700, easing:'ease-in-out', fill:'forwards'});
+      cup.animate([{transform:'rotateZ(0deg)'},{transform:'rotateZ(90deg)',offset:.3},{transform:'rotateZ(84deg)',offset:.42},
+        {transform:'rotateZ(90deg)',offset:.55},{transform:'rotateZ(90deg)'}],
+        {duration:1200, easing:'ease-in-out', fill:'forwards'});
+      cup.querySelectorAll(':scope > *').forEach(face=>face.animate([{opacity:1},{opacity:1,offset:.55},{opacity:0}],
+        {duration:1700, easing:'ease-in', fill:'forwards'}));
     }, 750);
     // 3) boca del vaso acostado (girado 90° sobre la esquina de abajo, la boca queda a "ancho+alto" del borde, a media altura)
     const a=(-VIEW.spin+YAW)*Math.PI/180, along=(cupW+cupH)-cupW/2;
