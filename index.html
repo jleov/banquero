@@ -595,12 +595,12 @@ function checkWinner(){
   const a=alive();
   if(a.length===1){ S.phase='over'; S.winner=a[0].id; log(`🏆 ¡${a[0].name} es el gran Banquero! Ganó la partida.`); }
 }
-function validTrade(t){
+function validTrade(t, proposing){
   const a=P(t.from), b=P(t.to);
   if(!a||!b||a.bk||b.bk||a.id===b.id) return 'Jugador inválido.';
   if(!(t.gm>=0) || !(t.rm>=0)) return 'Monto inválido.';
   if(t.gm>Math.max(0,a.money)) return `${a.name} no tiene ese dinero.`;
-  if(t.rm>Math.max(0,b.money)) return `${b.name} no tiene ese dinero.`;
+  if(!proposing && t.rm>Math.max(0,b.money)) return 'No te alcanza el dinero para aceptar.';   // al proponer no se revela la plata del otro
   for(const i of t.gp) if(!S.props[i] || S.props[i].o!==a.id || !tradable(i)) return 'Una propiedad ya no está disponible.';
   for(const i of t.rp) if(!S.props[i] || S.props[i].o!==b.id || !tradable(i)) return 'Una propiedad ya no está disponible.';
   if(!t.gp.length && !t.rp.length && !t.gm && !t.rm) return 'La oferta está vacía.';
@@ -660,7 +660,7 @@ function act(pid, a){
     case 'trade': {
       const t={id:++S.tradeSeq, from:pid, to:a.to, gm:Math.round(+a.gm||0), rm:Math.round(+a.rm||0),
                gp:(a.gp||[]).map(Number), rp:(a.rp||[]).map(Number)};
-      const err=validTrade(t); if(err) return err;
+      const err=validTrade(t, true); if(err) return err;
       if(S.trades.filter(x=>x.from===pid).length>=3) return 'Tenés demasiadas ofertas pendientes.';
       S.trades.push(t); log(`🤝 ${p.name} le hace una oferta a ${P(t.to).name}.`); break;
     }
@@ -743,11 +743,18 @@ function botTick(){
 setInterval(botTick, 1100);
 
 /* ====================== RED (PeerJS / WebRTC) ====================== */
-function publicState(){ const s=JSON.parse(JSON.stringify(S)); s.players.forEach(p=>delete p.token); return s; }
+// cada jugador recibe solo SU dinero; de los demás solo se sabe si no pudieron pagar (saldo negativo)
+function publicState(forPid){
+  const s=JSON.parse(JSON.stringify(S));
+  s.players.forEach(p=>{
+    delete p.token;
+    if(s.phase==='play' && p.id!==forPid){ p.neg = p.money<0; p.money=null; }
+  });
+  return s;
+}
 function commit(){
   if(NET.mode==='host'){
-    const msg={t:'state', s:publicState()};
-    for(const pid in NET.conns){ const c=NET.conns[pid]; if(c && c.open) try{ c.send(msg); }catch(e){} }
+    for(const pid in NET.conns){ const c=NET.conns[pid]; if(c && c.open) try{ c.send({t:'state', s:publicState(pid)}); }catch(e){} }
     store('bnq_host',{code:NET.code, S, CHAT:CHAT.slice(-80), myPid:NET.myPid, at:Date.now()});
   } else if(NET.mode==='local'){
     store('bnq_local',{S, at:Date.now()});
@@ -1166,7 +1173,7 @@ function renderCenter(){
     if(S.tp==='buy') w=`Está decidiendo si compra ${B[S.pendingBuy].n}…`;
     else if(S.tp==='roll') w = p.jail ? 'Está preso en Tacumbú…' : 'Va a tirar los dados…';
     else w='Está terminando su turno…';
-    if(p.money<0) w='Tiene saldo negativo y debe conseguir dinero…';
+    if(isNeg(p)) w='No pudo pagar: debe conseguir dinero o quebrar…';
     if(!p.conn) w='⚠️ Se desconectó.';
     if(p.bot) w='🤖 '+w;
     h+=`<div>${w}</div>`;
@@ -1178,6 +1185,10 @@ function renderCenter(){
 }
 
 const prevMoney={}; let prevWallet={pid:null, bills:null};
+// el dinero de los demás es secreto hasta el final de la partida
+const seesMoney = p => S.phase==='over' || p.id===meId();
+const isNeg = p => p.money!=null ? p.money<0 : !!p.neg;
+const moneyText = p => p.bk ? '—' : seesMoney(p) && p.money!=null ? fmt(p.money) : (isNeg(p) ? '⚠️ No puede pagar' : '🔒 Secreto');
 function renderWallet(){
   const pid=meId(), p=pid&&P(pid); const w=$('#wallet');
   if(!p || p.bk){ w.innerHTML=''; w.style.display='none'; return; }
@@ -1193,10 +1204,11 @@ function renderPlayers(){
     return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" data-pid="${p.id}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
       <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?' · en quiebra':''}</span></span>
-      <span class="mo ${p.money<0?'neg':''}">${fmt(p.money)}</span></div>`;
+      <span class="mo ${isNeg(p)?'neg':''}">${moneyText(p)}</span></div>`;
   }).join('');
   // cartelito +/− cuando cambia la plata
   for(const p of S.players){
+    if(!seesMoney(p)){ delete prevMoney[p.id]; continue; }
     const before=prevMoney[p.id]; prevMoney[p.id]=p.money;
     if(before==null || before===p.money) continue;
     const row=$(`.pl[data-pid="${p.id}"]`); if(!row) continue;
@@ -1310,7 +1322,7 @@ function showPlayer(pid){
   if(!S || S.phase==='lobby') return;
   if(pid===meId()) return showMyProps();
   const p=P(pid), list=ownedList(pid);
-  let h=`<h3>${p.emoji} ${esc(p.name)}</h3><p>Dinero: <b>${fmt(p.money)}</b>${p.jcards.length?' · 🎫 Salga libre':''}</p>${walletHTML(p)}<h4 style="margin:14px 0 4px">Propiedades</h4>`;
+  let h=`<h3>${p.emoji} ${esc(p.name)}</h3><p>Dinero: <b>${moneyText(p)}</b>${p.jcards.length?' · 🎫 Salga libre':''}</p>${seesMoney(p)?walletHTML(p):'<p class="muted">🔒 Su dinero es secreto: solo se sabe si no puede pagar.</p>'}<h4 style="margin:14px 0 4px">Propiedades</h4>`;
   h+=list.length?list.map(i=>`<div class="prow"><span class="sw" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span><span class="pn">${B[i].ic||''} ${B[i].n}</span><span class="muted">${S.props[i].m?'Hipotecada':S.props[i].h===5?'Hotel':S.props[i].h?S.props[i].h+' casa(s)':''}</span></div>`).join(''):'<p class="muted">Sin propiedades.</p>';
   if(!p.bk && S.phase==='play') h+=`<button class="btn gold wide" style="margin-top:8px" onclick="showTrade('${pid}')">🤝 Negociar con ${esc(p.name)}</button>`;
   modal(h,'player');
