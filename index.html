@@ -192,6 +192,7 @@ body.v3d .side > #hud{position:static;transform:none;width:auto;box-shadow:0 4px
 .cardidle{margin-top:10px;pointer-events:auto;text-align:left;color:#222;font-size:13px}
 .cardidle .acts{justify-content:flex-start}
 body > #comm{display:none !important}   /* el chat solo se muestra dentro de la sala o la partida */
+.mutebtn{border:0;border-radius:12px;background:var(--red);color:#fff;font-size:11px;font-weight:800;padding:2px 8px;margin-left:6px;cursor:pointer;vertical-align:middle}
 .observer{background:#eef3ff;border:1px solid #9db4e8;border-radius:10px;padding:10px;font-size:13.5px;line-height:1.4}
 .wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
 .wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
@@ -952,6 +953,13 @@ function act(pid, a){
   if(!S) return;
   const p=P(pid); if(!p) return 'Jugador desconocido.';
   if(a.type==='mic'){ p.mic=!!a.on; commit(); return; }
+  if(a.type==='muteOther'){   // el anfitrión silencia el micrófono de un jugador u observador (después lo puede volver a prender)
+    if(pid!==S.hostPid) return;
+    const t=P(a.id) || (S.observers||[]).find(o=>o.id===a.id);
+    if(!t || !t.mic) return;
+    t.mic=false; t.muteSeq=(t.muteSeq||0)+1;
+    sysChat(`🔇 El anfitrión silenció el micrófono de ${t.name}.`); commit(); return;
+  }
   p.activeAt=Date.now();   // cualquier cosa que haga el jugador cuenta como actividad
   if(a.type==='busy'){     // aviso del celular: está negociando, pidiendo cambio, contando billetes…
     const what=BUSY_WHAT.includes(a.what) ? a.what : '';
@@ -1289,6 +1297,12 @@ function hostOnData(conn, d){
     commit(); return;
   }
   const pid=conn.pid; if(!pid) return;
+  const ob=(S.observers||[]).find(o=>o.id===pid);
+  if(ob){   // los observadores solo pueden prender o apagar su micrófono (y chatear)
+    if(d.t==='act' && d.a && d.a.type==='mic'){ ob.mic=!!d.a.on; commit(); }
+    else if(d.t==='chat') addChat(pid, d.text);
+    return;
+  }
   if(d.t==='act'){ const r=act(pid, d.a||{}); if(typeof r==='string') conn.send({t:'err', m:r}); }
   else if(d.t==='chat'){ addChat(pid, d.text); }
 }
@@ -1360,7 +1374,7 @@ function connectHost(){
 function clientOnData(d){
   if(d.t==='welcome'){ NET.myPid=d.pid; NET.obs=d.obs||null; NET.welcomed=true; NET.taken=null; store('bnq_client',{code:NET.code, at:Date.now()}); if(location.hash!=='#'+NET.code) history.replaceState(null,'','#'+NET.code);
     if(d.why && !NET.obsToasted){ NET.obsToasted=true; toast(d.why); } }
-  else if(d.t==='state'){ S=d.s; render(); }
+  else if(d.t==='state'){ S=d.s; render(); checkForcedMute(); }
   else if(d.t==='chat'){ CHAT.push(d.m); renderChat(d.m); }
   else if(d.t==='chatlog'){ CHAT=d.list||[]; renderChat(); }
   else if(d.t==='err'){
@@ -1373,11 +1387,16 @@ function netBar(on,txt){ const b=$('#netbar'); b.style.display=on?'block':'none'
 
 /* ====================== VOZ ====================== */
 const VOICE={stream:null, calls:{}, audios:{}, muted:false};
+function stopMic(tell){   // apaga el micrófono (por el propio jugador o porque el anfitrión lo silenció)
+  if(!VOICE.stream) return;
+  VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null;
+  Object.values(VOICE.calls).forEach(c=>{ try{ c.close(); }catch(e){} }); VOICE.calls={};
+  if(tell) doAct({type:'mic', on:false});
+  renderVoice();
+}
 async function toggleMic(){
   if(VOICE.stream){
-    VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null;
-    Object.values(VOICE.calls).forEach(c=>{ try{ c.close(); }catch(e){} }); VOICE.calls={};
-    doAct({type:'mic', on:false});
+    stopMic(true);
   } else {
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Este navegador no permite usar el micrófono (se necesita HTTPS).'); return; }
     try{ VOICE.stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
@@ -1391,7 +1410,7 @@ function voiceSync(){
   if(!VOICE.stream || !NET.peer || !S || NET.mode==='local') return;
   const myPeer=NET.peer.id;
   const live=new Set();
-  for(const p of S.players){
+  for(const p of [...S.players, ...(S.observers||[])]){   // también a los observadores, para que escuchen
     if(!p.peerId || p.peerId===myPeer || !p.conn) continue;
     live.add(p.peerId);
     if(!VOICE.calls[p.peerId]){
@@ -1422,7 +1441,20 @@ function renderVoice(){
   const b=$('#btnMic'); b.textContent = VOICE.stream ? '🎤 Micrófono ACTIVO (tocá para apagar)' : '🎤 Activar micrófono';
   b.classList.toggle('mic-on', !!VOICE.stream); b.classList.toggle('gray', !VOICE.stream);
   $('#btnSpk').textContent = VOICE.muted ? '🔇' : '🔊';
-  $('#voiceBar').style.display = NET.mode==='local' || NET.obs ? 'none' : 'flex';
+  $('#voiceBar').style.display = NET.mode==='local' ? 'none' : 'flex';   // los observadores también pueden escuchar y hablar
+}
+// botón del anfitrión para silenciar a quien tiene el micrófono abierto (jugador u observador)
+const muteBtn = x => NET.mode==='host' && x && x.mic && x.id!==NET.myPid
+  ? `<button class="mutebtn" title="Silenciar el micrófono de ${esc(x.name)}" onclick="event.stopPropagation();doAct({type:'muteOther',id:'${x.id}'})">🔇 Silenciar</button>` : '';
+const obsName = o => esc(o.name)+(o.id===NET.obs?' (vos)':'')+(o.mic?' 🎤':'')+muteBtn(o);
+// ¿el anfitrión me silenció? (cada silenciada sube un contador; al entrar no cuenta lo viejo)
+function checkForcedMute(){
+  if(NET.mode!=='client' || !S) return;
+  const me = NET.myPid ? P(NET.myPid) : (S.observers||[]).find(o=>o.id===NET.obs);
+  if(!me) return;
+  const seq=me.muteSeq||0;
+  if(VOICE.muteSeq==null){ VOICE.muteSeq=seq; return; }
+  if(seq>VOICE.muteSeq){ VOICE.muteSeq=seq; if(VOICE.stream){ stopMic(false); toast('🔇 El anfitrión silenció tu micrófono. Podés volver a activarlo cuando quieras.'); } }
 }
 
 /* ====================== INTERFAZ ====================== */
@@ -1451,8 +1483,8 @@ function renderLobby(){
   $('#lobbyCode').textContent=NET.code||'';
   $('#lobbyCount').textContent=S.players.length;
   const isHost = NET.mode==='host';
-  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}${p.bot&&isHost?`<button class="btn sm gray" onclick="doAct({type:'removeBot',id:'${p.id}'})">✕</button>`:''}</li>`).join('')
-    + ((S.observers||[]).length ? `<li style="background:#eef3ff">👀 <span style="flex:1">Mirando: ${S.observers.map(o=>esc(o.name)+(o.id===NET.obs?' (vos)':'')).join(', ')}</span></li>` : '');
+  $('#lobbyPlayers').innerHTML=S.players.map(p=>`<li><span class="dot" style="background:${p.color}"></span><span style="font-size:22px">${p.emoji}</span><b style="flex:1">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid?' (vos)':''}</b>${p.id===S.hostPid?'<span class="muted">anfitrión</span>':''}${p.mic?' 🎤':''}${muteBtn(p)}${p.bot&&isHost?`<button class="btn sm gray" onclick="doAct({type:'removeBot',id:'${p.id}'})">✕</button>`:''}</li>`).join('')
+    + ((S.observers||[]).length ? `<li style="background:#eef3ff">👀 <span style="flex:1">Mirando: ${S.observers.map(obsName).join(', ')}</span></li>` : '');
   $('#btnAddBot').style.display = isHost ? 'block' : 'none';
   $('#btnAddBot').disabled = S.players.length>=6;
   $('#btnStart').style.display = isHost ? 'block' : 'none';
@@ -2142,10 +2174,10 @@ function renderPlayers(){
     const n=Object.values(S.props).filter(o=>o.o===p.id).length;
     return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" data-pid="${p.id}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
-      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.kicked?' · 🚪 lo sacaron':p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${!p.bk&&!p.conn&&!p.bot&&NET.mode!=='local'?' '+offAgo(p):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
+      <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤 hablando':''}${muteBtn(p)}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?(p.kicked?' · 🚪 lo sacaron':p.retired?' · 🏳️ se retiró':' · en quiebra'):''}${!p.bk&&!p.conn&&!p.bot&&NET.mode!=='local'?' '+offAgo(p):''}${p.bk&&p.conn&&!p.bot&&NET.mode!=='local'?' · 👀 mirando':''}</span></span>
       <span class="mo ${isNeg(p)?'neg':''}">${moneyText(p)}</span></div>`;
   }).join('');
-  if((S.observers||[]).length) $('#players').insertAdjacentHTML('beforeend', `<div class="muted" style="padding:2px 6px">👀 Mirando: ${S.observers.map(o=>esc(o.name)+(o.id===NET.obs?' (vos)':'')).join(', ')}</div>`);
+  if((S.observers||[]).length) $('#players').insertAdjacentHTML('beforeend', `<div class="muted" style="padding:2px 6px">👀 Mirando: ${S.observers.map(obsName).join(', ')}</div>`);
   // cartelito +/− cuando cambia la plata
   for(const p of S.players){
     if(!seesMoney(p)){ delete prevMoney[p.id]; continue; }
@@ -2437,7 +2469,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
-  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; sfxLogSeq=-1; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
+  PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; sfxLogSeq=-1; VOICE.muteSeq=null; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
   // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
   [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
   prevOwned=prevHouses=null; prevWallet={pid:null, bills:null}; shownRoll=-1; lastTurnPid=null;
