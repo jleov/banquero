@@ -368,7 +368,7 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
       <button class="btn gray wide" id="btnAddBot" style="margin-bottom:8px">🤖 Agregar un bot</button>
       <button class="btn red wide" id="btnStart">🎲 Empezar partida</button>
       <p class="muted" id="lobbyWait" style="text-align:center"></p>
-      <button class="btn gray wide" onclick="confirmLeave()">🏠 Volver al inicio</button>
+      <div class="row" style="margin-top:8px"><button class="btn gray" onclick="confirmLeave()">🏠 Volver al inicio</button><button class="btn gray btnMusic" style="flex:0 0 auto" onclick="toggleMusic()" title="Música de fondo">🎶</button></div>
     </div>
     <div class="box" id="lobbyComm" style="height:380px;display:flex;flex-direction:column"></div>
   </div>
@@ -399,6 +399,7 @@ body > #comm{display:none !important}   /* el chat solo se muestra dentro de la 
           <button class="btn sm gold" onclick="showTrade()">🤝 Negociar</button>
           <button class="btn sm gray" onclick="showRules()">📜 Reglas</button>
           <button class="btn sm gray" id="btnSfx" style="flex:0 0 auto" onclick="toggleSfx()" title="Sonidos del juego">🎵</button>
+          <button class="btn sm gray btnMusic" style="flex:0 0 auto" onclick="toggleMusic()" title="Música de fondo">🎶</button>
           <button class="btn sm red" style="flex:0 0 auto" onclick="confirmLeave()" title="Volver al inicio">🏠 Inicio</button>
           <button class="btn sm" id="btnView" style="background:#4a2f7a" onclick="toggleView()" title="Cambiar entre tablero plano y 3D">🧊 Vista 3D</button>
         </div>
@@ -1475,7 +1476,7 @@ function render(){
   if(!S) return;
   if(S.phase==='lobby'){ show('lobby'); renderLobby(); placeComm('#lobbyComm'); }
   else { show('game'); if(!$('#board').children.length) buildBoard(); placeComm('#gameComm'); renderGame(); }
-  renderLog(); renderVoice(); voiceSync();
+  renderLog(); renderVoice(); voiceSync(); musicSync();
 }
 function placeComm(sel){ const c=$('#comm'), t=$(sel); if(c.parentElement!==t) t.appendChild(c); }
 
@@ -1627,9 +1628,34 @@ function moneySounds(){
   if(cuenta){ SFX.counter(); lastMoneySound=Date.now(); }
   if(caja){ SFX.register(cuenta ? 1.25 : 0); lastMoneySound=Date.now(); }   // si hubo conteo, la caja suena después
 }
+// ---- música de fondo: arpa en tres tiempos, en bucle, al 25% del volumen de los efectos ----
+const MUSIC = { on: load('bnq_music')!==false, buf:null, src:null, gain:null, loading:false, VOL:.1 };
+function musicLoad(){
+  if(MUSIC.buf || MUSIC.loading) return Promise.resolve(); MUSIC.loading=true;
+  return fetch('musica.mp3').then(r=>r.arrayBuffer()).then(b=>ac().decodeAudioData(b)).then(buf=>{ MUSIC.buf=buf; }).catch(()=>{ MUSIC.loading=false; });
+}
+function musicStart(){
+  if(!MUSIC.on || MUSIC.src) return;
+  musicLoad().then(()=>{
+    if(!MUSIC.buf || MUSIC.src || !MUSIC.on || !musicWanted()) return;
+    const c=ac(), s=c.createBufferSource(), g=c.createGain();
+    s.buffer=MUSIC.buf; s.loop=true; s.connect(g); g.connect(c.destination);
+    g.gain.setValueAtTime(0.0001, c.currentTime); g.gain.exponentialRampToValueAtTime(MUSIC.VOL, c.currentTime+2.5);   // entra suave
+    s.start(); MUSIC.src=s; MUSIC.gain=g;
+  });
+}
+function musicStop(){
+  if(!MUSIC.src) return;
+  const c=ac(), s=MUSIC.src, g=MUSIC.gain; MUSIC.src=null; MUSIC.gain=null;
+  try{ g.gain.setValueAtTime(g.gain.value, c.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime+.8); s.stop(c.currentTime+.85); }catch(e){}
+}
+const musicWanted = () => !!S && (S.phase==='lobby' || S.phase==='play' || S.phase==='over');   // suena en la sala y en la partida, no en el menú
+function musicSync(){ if(MUSIC.on && musicWanted()) musicStart(); else musicStop(); renderMusicBtn(); }
+function toggleMusic(){ MUSIC.on=!MUSIC.on; store('bnq_music', MUSIC.on); musicSync(); toast(MUSIC.on?'🎶 Música de fondo prendida (suave).':'🔕 Música de fondo apagada.'); }
+function renderMusicBtn(){ document.querySelectorAll('.btnMusic').forEach(b=>{ b.textContent = MUSIC.on ? '🎶' : '🔕'; b.title = MUSIC.on ? 'Apagar la música de fondo' : 'Prender la música de fondo'; }); }
 function toggleSfx(){ SFX.on=!SFX.on; store('bnq_sfx',SFX.on); renderSfxBtn(); if(SFX.on) SFX.coins(); }
 function renderSfxBtn(){ const b=$('#btnSfx'); b.textContent=SFX.on?'🎵':'🔇'; b.title=SFX.on?'Apagar sonidos del juego':'Prender sonidos del juego'; }
-renderSfxBtn();
+renderSfxBtn(); renderMusicBtn();
 
 function renderTokens(){
   document.querySelectorAll('.toks').forEach(t=>t.innerHTML='');
@@ -2469,6 +2495,7 @@ function leaveToMenu(){
   try{ if(NET.peer) NET.peer.destroy(); }catch(e){}
   if(VOICE.stream){ VOICE.stream.getTracks().forEach(t=>t.stop()); VOICE.stream=null; }
   NET.mode=null; NET.peer=null; NET.conns={}; NET.hostConn=null; S=null;
+  musicStop();
   PICK={key:null, sel:{}, exch:false}; openedRent=null; bankSel=null; sfxLogSeq=-1; VOICE.muteSeq=null; NET.obs=null; NET.obsToasted=false; NET.myPid=null; NET.welcomed=false;
   // olvidar lo que se mostraba de la partida anterior (posiciones, plata, animaciones)
   [disp, prevMoney, prevJail].forEach(o=>{ for(const k in o) delete o[k]; });
