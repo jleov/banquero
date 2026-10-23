@@ -134,6 +134,10 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .pickrow{min-height:54px;padding:10px 6px 6px;background:#fff;border-radius:10px;margin-bottom:8px}
 .pickrow.given{background:#e7f6ea;border:2px dashed #2a9d3f}
 .pickrow.exch .bill{outline:3px solid var(--gold);animation:billpop 1.2s infinite}
+.bill.chosen{outline:3px solid var(--red);transform:scale(1.08)}
+.chopt{display:flex;align-items:center;gap:10px;background:#fff;border-radius:10px;padding:12px 8px 8px;margin-bottom:8px;cursor:pointer;border:2px solid transparent}
+.chopt:hover{border-color:#2a9d3f}
+.chopt .bills{flex:1}
 .plabel{font-size:13px;font-weight:700;margin:6px 0 4px}
 .pmsg{text-align:center;margin:6px 0 10px;font-size:14px;color:var(--red)}
 .pmsg.ok{color:#1b6b2c}
@@ -461,7 +465,22 @@ const BREAK = {5000000:{1000000:5}, 1000000:{500000:2}, 500000:{200000:2,100000:
 function addBills(p, amt){ for(const b of BILLS){ const n=Math.floor(amt/b.v); if(n){ p.bills[b.v]=(p.bills[b.v]||0)+n; amt-=n*b.v; } } }
 function takeBills(p, sel){ for(const v in sel) p.bills[v]-=sel[v]; }
 function giveBills(p, sel){ for(const v in sel) p.bills[v]=(p.bills[v]||0)+sel[v]; }
-function exchangeBill(p, v){ v=+v; if(!BREAK[v] || !(p.bills[v]>0)) return false; p.bills[v]--; giveBills(p, BREAK[v]); return true; }
+// formas de pedir cambio de cada billete (la primera es la que usa el vuelto automático)
+const CHANGE_OPTS = {
+  5000000:[{1000000:5},{1000000:4,500000:2},{1000000:3,500000:2,200000:5}],
+  1000000:[{500000:2},{200000:5},{100000:10},{500000:1,200000:2,100000:1}],
+  500000:[{200000:2,100000:1},{100000:5},{50000:10}],
+  200000:[{100000:2},{50000:4},{100000:1,50000:1,10000:5}],
+  100000:[{50000:2},{10000:10}],
+  50000:[{10000:5}]
+};
+function exchangeBill(p, v, opt){
+  v=+v; const o=CHANGE_OPTS[v] && CHANGE_OPTS[v][opt|0];
+  if(!o || !(p.bills[v]>0)) return false;
+  p.bills[v]--; giveBills(p, o); return true;
+}
+// se puede pedir cambio en tu turno, o cuando estás pagando/cobrando un alquiler
+const canExchange = pid => S.phase==='play' && (isTurnOf(pid) || (S.rent && (S.rent.from===pid || S.rent.to===pid)));
 function exactBills(bl, amt){   // billetes justos (de mayor a menor); null si no se puede así
   const sel={}; let rem=amt;
   for(const b of BILLS){ const n=Math.min(bl[b.v]||0, Math.floor(rem/b.v)); if(n){ sel[b.v]=n; rem-=n*b.v; } }
@@ -856,8 +875,9 @@ function act(pid, a){
       finishRent(); break;
     }
     case 'exchange':   // cambiar un billete en el Banco por otros más chicos
-      if(!exchangeBill(p, a.v)) return 'Ese billete no se puede cambiar.';
-      log(`🏦 ${p.name} cambia un billete de ${fmt(+a.v)} en el Banco.`); break;
+      if(!canExchange(pid)) return 'Podés pedir cambio al Banco solo en tu turno.';
+      if(!exchangeBill(p, a.v, a.opt)) return 'Ese billete no se puede cambiar.';
+      log(`🏦 ${p.name} cambia un billete de ${fmt(+a.v)} en el Banco por ${billText(CHANGE_OPTS[+a.v][a.opt|0])}.`); break;
     case 'skipTurn':
       if(pid!==S.hostPid || cur().conn) return; log(`${cur().name} no está conectado: se salta su turno.`);
       if(S.rent) autoRent(); nextTurn(); break;
@@ -1389,9 +1409,33 @@ function renderGame(){
   renderCenter(); renderPlayers(); renderTrades();
   const m=$('#modalRoot'); if(m.dataset.kind==='props') showMyProps(true); if(m.dataset.kind==='prop') showProp(+m.dataset.i, true); if(m.dataset.kind==='titles') showTitles(null, true); if(m.dataset.kind==='buy') showBuyTitle(true);
   // alquiler en mano: abrir solo la ventana de billetes al que le toca actuar
+  if(m.dataset.kind==='bank') showBank(true);
   if(m.dataset.kind==='rentpick') showRentPicker(true);
   else if(S.rent){ const R=S.rent, key=R.id+R.stage; if(key!==openedRent && canAct(R.stage==='pay'?R.from:R.to)){ openedRent=key; showRentPicker(); } }
   if(S.rent && S.rent.stage==='change'){ clearTimeout(rentTimer); rentTimer=setTimeout(()=>{ if(S&&S.rent) renderCenter(); }, 31000-(Date.now()-S.rent.at)); }
+}
+
+// --- pedir cambio al Banco ---
+let bankSel=null;   // billete elegido para cambiar
+function showBank(refresh){
+  const r=$('#modalRoot'); if(refresh && r.dataset.kind!=='bank') return;
+  const pid=meId(), p=pid&&P(pid); if(!p || S.phase!=='play') return;
+  if(!canExchange(pid)){ if(refresh) closeModal(); return; }
+  const bl=p.bills||{};
+  if(bankSel && !(bl[bankSel]>0)) bankSel=null;
+  const can=BILLS.filter(b=>CHANGE_OPTS[b.v] && bl[b.v]>0);
+  let h=`<h3>🏦 Pedir cambio al Banco</h3>
+    <p class="muted" style="margin-top:0">Cambiá billetes grandes por más chicos para tener sencillo. El total no cambia: siguen siendo ${fmt(p.money)}.</p>
+    <div class="plabel">Tus billetes — tocá el que querés cambiar:</div>
+    <div class="bills pickrow">${BILLS.filter(b=>bl[b.v]>0).map(b=>billChip(b.v,bl[b.v], CHANGE_OPTS[b.v]?`bankSel=${b.v};showBank(true)`:'', (CHANGE_OPTS[b.v]?'pickable':'')+(bankSel===b.v?' chosen':''))).join('')}</div>`;
+  if(!can.length) h+='<p class="muted">Ya tenés todo en billetes de ₲ 10.000: no hay nada más chico.</p>';
+  else if(!bankSel) h+='<p class="pmsg ok">Elegí un billete de arriba.</p>';
+  else {
+    h+=`<div class="plabel">Cambiar 1 billete de ${fmt(bankSel)} por:</div>`;
+    h+=CHANGE_OPTS[bankSel].map((o,k)=>`<div class="chopt" onclick="doAct({type:'exchange',v:${bankSel},opt:${k}},'${pid}')">
+      <div class="bills">${BILLS.filter(b=>o[b.v]).map(b=>billChip(b.v,o[b.v])).join('')}</div><span class="btn sm green">Cambiar</span></div>`).join('');
+  }
+  modal(h,'bank');
 }
 
 // --- pagar con billetes y dar vuelto ---
@@ -1525,7 +1569,8 @@ function renderWallet(){
   const pid=meId(), p=pid&&P(pid); const w=$('#wallet');
   if(!p || p.bk){ w.innerHTML=''; w.style.display='none'; return; }
   w.style.display='block';
-  w.innerHTML=`<h4><span>💵 ${NET.mode==='local'?'Billetes de '+esc(p.name):'Tus billetes'}</span><span>${fmt(p.money)}</span></h4>${walletHTML(p)}`;
+  w.innerHTML=`<h4><span>💵 ${NET.mode==='local'?'Billetes de '+esc(p.name):'Tus billetes'}</span><span>${fmt(p.money)}</span></h4>${walletHTML(p)}
+    ${S.phase==='play'?`<button class="btn sm gold wide" style="margin-top:10px" ${canExchange(pid)?'':'disabled'} onclick="showBank()">🏦 Pedir cambio al Banco${canExchange(pid)?'':' (en tu turno)'}</button>`:''}`;
   const now={...(p.bills||billsOf(p.money))};
   if(prevWallet.pid===pid && prevWallet.bills) w.querySelectorAll('.bill').forEach(el=>{ if(now[el.dataset.v]!==prevWallet.bills[el.dataset.v]) el.classList.add('pop'); });
   prevWallet={pid, bills:now};
