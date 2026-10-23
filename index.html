@@ -88,8 +88,16 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .dice{display:flex;gap:.7em}
 .die{width:3em;height:3em;background:#fff;border-radius:.5em;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);padding:.35em;box-shadow:0 3px 0 #999,0 4px 8px rgba(0,0,0,.3)}
 .die i{border-radius:50%;margin:12%}.die i.on{background:#c0151a}
-.die.rolling{animation:shake .12s infinite}
-@keyframes shake{0%{transform:rotate(-12deg)}50%{transform:rotate(12deg) translateY(-3px)}100%{transform:rotate(-12deg)}}
+#diceLayer{grid-area:2/2/11/11;position:relative;pointer-events:none;z-index:6;overflow:visible}
+#diceLayer .cup{position:absolute;transform-origin:50% 60%;filter:drop-shadow(0 6px 6px rgba(0,0,0,.45))}
+#diceLayer .d3{position:absolute;left:0;top:0;perspective:600px;opacity:0}
+.cube{width:100%;height:100%;position:relative;transform-style:preserve-3d}
+.face{position:absolute;inset:0;background:#fff;border-radius:16%;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);padding:12%;
+  box-shadow:inset 0 0 0 1px #ddd,inset 0 -3px 6px rgba(0,0,0,.18);backface-visibility:hidden}
+.face i{border-radius:50%;margin:12%}.face i.on{background:#c0151a}
+.f1{transform:translateZ(var(--h))}.f6{transform:rotateY(180deg) translateZ(var(--h))}
+.f3{transform:rotateY(90deg) translateZ(var(--h))}.f4{transform:rotateY(-90deg) translateZ(var(--h))}
+.f2{transform:rotateX(90deg) translateZ(var(--h))}.f5{transform:rotateX(-90deg) translateZ(var(--h))}
 .status{font-weight:700}
 .acts{display:flex;flex-wrap:wrap;gap:.5em;justify-content:center}
 .acts .btn{font-size:1em;padding:.6em 1em}
@@ -111,6 +119,21 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
 .tools{display:flex;flex-wrap:wrap;gap:6px}
 .tools .btn{flex:1 1 auto}
 .trades:empty{display:none}
+.wallet{margin-top:8px;background:#fff;border-radius:10px;padding:8px}
+.wallet h4{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
+.bills{display:flex;flex-wrap:wrap;gap:8px 10px}
+.bill{position:relative;width:76px;height:38px;border-radius:5px;background:linear-gradient(135deg,var(--bc),color-mix(in srgb,var(--bc) 70%,#fff));
+  border:2px solid #fff;outline:1px solid var(--bc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;text-shadow:0 1px 1px rgba(0,0,0,.4)}
+.bill.stack{box-shadow:3px 3px 0 -1px #fff,3px 3px 0 0 var(--bc),6px 6px 0 -1px #fff,6px 6px 0 0 var(--bc)}
+.bill .bseal{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.3);font-size:10px;display:flex;align-items:center;justify-content:center}
+.bill .bv{margin-left:12px}
+.bill .bn{position:absolute;right:-8px;top:-9px;background:#222;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;text-shadow:none;border:2px solid #fff}
+.bill.pop{animation:billpop .6s}
+@keyframes billpop{40%{transform:scale(1.25) rotate(-4deg)}}
+.pl{position:relative}
+.delta{position:absolute;right:10px;top:-4px;font-weight:900;font-size:15px;pointer-events:none;animation:floatup 2.2s forwards;text-shadow:0 1px 0 #fff}
+.delta.up{color:#1f8a36}.delta.down{color:var(--red)}
+@keyframes floatup{0%{opacity:0;transform:translateY(8px)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(-22px)}}
 .trade{background:#fff;border-radius:10px;padding:8px;margin-top:6px;font-size:13px;border:2px solid var(--gold)}
 .comm{flex:1;min-height:0;display:flex;flex-direction:column}
 .tabs{display:flex;gap:4px;margin-bottom:6px}
@@ -228,6 +251,7 @@ input[type=text],input[type=number],select{width:100%;padding:10px 12px;border:1
           <button class="btn sm gray" onclick="showRules()">📜 Reglas</button>
         </div>
         <div class="trades" id="trades"></div>
+        <div class="wallet" id="wallet"></div>
       </div>
       <div class="panel comm" id="gameComm"></div>
     </div>
@@ -373,7 +397,26 @@ const ownsGroup = (pid,g) => groupIdx(g).every(i=>S.props[i] && S.props[i].o===p
 const countType = (pid,t) => B.filter((s,i)=>s.t===t && S.props[i] && S.props[i].o===pid).length;
 const groupClear = g => groupIdx(g).every(j=>!S.props[j] || S.props[j].h===0);
 const mortValue = i => B[i].p*K/2;
-const unmortCost = i => Math.round(B[i].p*K/2*1.1);
+const unmortCost = i => Math.ceil(B[i].p*K/2*1.1/10000)*10000;   // redondeado al billete más chico
+
+// billetes del Banquero (como en la caja del juego de mesa)
+const BILLS=[{v:5000000,c:'#8d6e2f'},{v:1000000,c:'#6a3d9a'},{v:500000,c:'#e67e22'},{v:200000,c:'#2e8b57'},{v:100000,c:'#1f6fb5'},{v:50000,c:'#d6589f'},{v:10000,c:'#6f7f80'}];
+const BILL_START={10000:5,50000:5,100000:5,200000:6,500000:2};   // billetes chicos que se guardan para dar vuelto; el resto en billetes grandes
+function billsOf(amount){
+  const out={}; BILLS.forEach(b=>out[b.v]=0);
+  let rem=Math.max(0,Math.floor(amount/10000)*10000);
+  for(const b of BILLS.slice().reverse()){ const n=Math.min(BILL_START[b.v]||0, Math.floor(rem/b.v)); out[b.v]+=n; rem-=n*b.v; }
+  for(const b of BILLS){ const n=Math.floor(rem/b.v); out[b.v]+=n; rem-=n*b.v; }
+  return out;
+}
+const billLabel = v => v>=1e6 ? (v/1e6)+' M' : (v/1000)+' mil';
+function walletHTML(p){
+  if(p.money<0) return `<div class="muted" style="color:var(--red)">Sin billetes: debe ${fmt(-p.money)} al Banco.</div>`;
+  const bl=billsOf(p.money);
+  const items=BILLS.filter(b=>bl[b.v]>0).map(b=>`<div class="bill ${bl[b.v]>1?'stack':''}" style="--bc:${b.c}" data-v="${b.v}" title="${bl[b.v]} billete(s) de ${fmt(b.v)}">
+    <span class="bseal">₲</span><span class="bv">${billLabel(b.v)}</span><span class="bn">×${bl[b.v]}</span></div>`).join('');
+  return `<div class="bills">${items||'<span class="muted">Sin billetes</span>'}</div>`;
+}
 // en modo local "yo" es el jugador del turno; si le toca a un bot, el primer humano
 const meId = () => {
   if(NET.mode!=='local') return NET.myPid;
@@ -431,7 +474,7 @@ function startGame(){
   S = {phase:'play', players, seq:S.seq, hostPid:S.hostPid, props:{}, turn:0, tp:'roll', dbl:0, rolledDbl:false,
        roll:[1,1], rollId:0, card:null, cardId:0, pendingBuy:null, decks:{cc:shuffle(range(16)), ca:shuffle(range(16))},
        trades:[], tradeSeq:0, log:[], logSeq:0, winner:null};
-  log('¡Empieza la partida! Cada jugador recibe '+fmt(START_MONEY)+'.');
+  log('¡Empieza la partida! El Banquero reparte a cada jugador '+fmt(START_MONEY)+': 2 billetes de ₲ 5.000.000, 2 de ₲ 1.000.000, 2 de ₲ 500.000, 6 de ₲ 200.000, 5 de ₲ 100.000, 5 de ₲ 50.000 y 5 de ₲ 10.000.');
   log('Turno de '+cur().name+'.');
 }
 function backToLobby(){
@@ -941,12 +984,16 @@ function buildBoard(){
     b.appendChild(el);
   }
   const ctr=document.createElement('div'); ctr.id='center'; b.appendChild(ctr);
+  const dl=document.createElement('div'); dl.id='diceLayer'; b.appendChild(dl);
 }
 
 // --- animaciones de fichas y dados ---
 const disp={}; let shownRoll=-1, shownCard=-1, rollingUntil=0, lastTurnPid=null;
+let diceEndAt=0, uiHoldUntil=0, holdTimer=null;
+const ROLL_MS=1900, STEP_MS=150;
 setInterval(()=>{
   if(!S || S.phase==='lobby') return;
+  if(Date.now()<diceEndAt) return;   // las fichas esperan a que caigan los dados
   let changed=false;
   for(const p of S.players){
     if(disp[p.id]==null){ disp[p.id]=p.pos; changed=true; continue; }
@@ -957,7 +1004,7 @@ setInterval(()=>{
     }
   }
   if(changed) renderTokens();
-}, 150);
+}, STEP_MS);
 
 let actx=null;
 function beep(f,dur,vol){
@@ -978,9 +1025,83 @@ function renderTokens(){
   }
 }
 const PIPS={1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
-const dieHTML=(n,rolling)=>`<div class="die${rolling?' rolling':''}">${range(9).map(k=>`<i class="${PIPS[n].includes(k+1)?'on':''}"></i>`).join('')}</div>`;
+const pipsHTML=n=>range(9).map(k=>`<i class="${PIPS[n].includes(k+1)?'on':''}"></i>`).join('');
+const dieHTML=n=>`<div class="die">${pipsHTML(n)}</div>`;
+
+// --- cubilete: se sacude, se vuelca y los dados ruedan hasta la mesa ---
+const CUP_SVG=`<svg viewBox="0 0 60 72" width="100%" height="100%"><defs>
+  <linearGradient id="cupg" x1="0" x2="1"><stop offset="0" stop-color="#4a2410"/><stop offset=".45" stop-color="#9a5a2c"/><stop offset="1" stop-color="#3b1c0c"/></linearGradient>
+  <radialGradient id="cupm" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#140904"/><stop offset="1" stop-color="#3b1c0c"/></radialGradient></defs>
+  <path d="M6 8 L54 8 L46 68 Q30 72 14 68 Z" fill="url(#cupg)" stroke="#2a1206" stroke-width="1.5"/>
+  <path d="M10 22 L50 22 M12 52 L48 52" stroke="#e9b949" stroke-width="1.6" stroke-dasharray="3 2.5"/>
+  <text x="30" y="41" text-anchor="middle" font-size="11" font-weight="900" fill="#e9b949" font-family="Arial">₲</text>
+  <ellipse cx="30" cy="8" rx="24" ry="6" fill="url(#cupm)" stroke="#c99a06" stroke-width="2"/></svg>`;
+const FACE_ROT={1:[0,0],2:[-90,0],3:[0,-90],4:[0,90],5:[90,0],6:[0,180]};
+const cubeHTML=()=>`<div class="cube">${[1,2,3,4,5,6].map(n=>`<div class="face f${n}">${pipsHTML(n)}</div>`).join('')}</div>`;
+function animateDice(r){
+  const layer=$('#diceLayer'), spot=$('#diceSpot');
+  if(!layer || !spot){ return; }
+  const L=layer.getBoundingClientRect(), dies=[...spot.children].map(d=>d.getBoundingClientRect());
+  if(!dies.length || !L.width) return;
+  const ds=dies[0].width, cupW=ds*1.55, cupH=ds*1.85;
+  const land=dies.map(d=>({x:d.left-L.left, y:d.top-L.top}));
+  const cx=Math.max(4, land[0].x-cupW*1.9), cy=Math.max(4, land[0].y-cupH*1.15);
+  layer.innerHTML=`<div class="cup" style="width:${cupW}px;height:${cupH}px;left:${cx}px;top:${cy}px">${CUP_SVG}</div>`+
+    r.map((n,k)=>`<div class="d3" style="width:${ds}px;height:${ds}px">${cubeHTML()}</div>`).join('');
+  layer.style.setProperty('--h', (ds/2)+'px');
+  const cup=layer.querySelector('.cup');
+  // 1) sacudir el cubilete
+  cup.animate([
+    {transform:'translate(0,0) rotate(0deg)'},{transform:'translate(-4px,-6px) rotate(-14deg)'},{transform:'translate(5px,-2px) rotate(12deg)'},
+    {transform:'translate(-5px,-7px) rotate(-16deg)'},{transform:'translate(4px,-3px) rotate(13deg)'},{transform:'translate(-3px,-6px) rotate(-10deg)'},
+    {transform:'translate(0,-8px) rotate(0deg)'}], {duration:750, easing:'ease-in-out'});
+  for(let t=0;t<720;t+=85) setTimeout(()=>beep(1700+Math.random()*1200,.018,.05), t);
+  // 2) volcarlo hacia la mesa
+  setTimeout(()=>{
+    cup.animate([{transform:'translate(0,-8px) rotate(0deg)',opacity:1},{transform:`translate(${cupW*.35}px,${cupH*.15}px) rotate(112deg)`,opacity:1,offset:.45},
+      {transform:`translate(${cupW*.35}px,${cupH*.15}px) rotate(112deg)`,opacity:1,offset:.7},{transform:`translate(${cupW*.1}px,${-cupH*.6}px) rotate(60deg)`,opacity:0}],
+      {duration:1000, easing:'ease-out', fill:'forwards'});
+  }, 750);
+  // 3) los dados salen rodando, giran y caen en la mesa
+  const mouth={x:cx+cupW*1.05, y:cy+cupH*.55};
+  layer.querySelectorAll('.d3').forEach((el,k)=>{
+    const end=land[k], [rx,ry]=FACE_ROT[r[k]];
+    const sx=mouth.x+k*ds*.2, sy=mouth.y-k*ds*.15;
+    const mx=(sx+end.x)/2+ds*(k?.6:-.2), my=Math.min(sy,end.y)-ds*(1.1+k*.4);
+    const T=(x,y,s)=>`translate(${x}px,${y}px) scale(${s})`;
+    el.animate([
+      {transform:T(sx,sy,.45),opacity:0,offset:0},{transform:T(sx+ds*.2,sy-ds*.2,.7),opacity:1,offset:.08},
+      {transform:T(mx,my,1.12),opacity:1,offset:.42},{transform:T(end.x,end.y,1),opacity:1,offset:.7},
+      {transform:T(end.x+ds*.06,end.y-ds*.35,1),opacity:1,offset:.83},{transform:T(end.x,end.y,1),opacity:1,offset:1}],
+      {duration:1000, delay:900+k*70, easing:'cubic-bezier(.3,.7,.4,1)', fill:'both'});
+    const spinX=rx+(720+Math.floor(Math.random()*3)*360)*(k?1:-1), spinY=ry+(360+Math.floor(Math.random()*2)*360);
+    el.firstChild.animate([
+      {transform:`rotateX(${spinX}deg) rotateY(${spinY}deg) rotateZ(${90+Math.random()*180}deg)`},
+      {transform:`rotateX(${rx+(k?40:-40)}deg) rotateY(${ry+25}deg) rotateZ(15deg)`,offset:.75},
+      {transform:`rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(0deg)`}],
+      {duration:1000, delay:900+k*70, easing:'ease-out', fill:'both'});
+  });
+  setTimeout(()=>{ beep(140,.07,.14); setTimeout(()=>beep(170,.05,.1),110); }, 900+700);
+  setTimeout(()=>{ beep(150,.05,.08); }, 900+1000);
+  setTimeout(()=>{ if(Date.now()>=diceEndAt){ layer.innerHTML=''; renderCenter(); } }, ROLL_MS+80);
+}
 
 function renderGame(){
+  // dados: si hubo una tirada nueva, primero se anima y el resto de la pantalla espera
+  if(S.rollId!==shownRoll){
+    const first=shownRoll===-1; shownRoll=S.rollId;
+    if(!first){
+      let steps=0;
+      for(const p of S.players){ if(disp[p.id]==null) continue; const d=(p.pos-disp[p.id]+40)%40; if(d<=12 && !p.jail) steps=Math.max(steps,d); }
+      diceEndAt=Date.now()+ROLL_MS; uiHoldUntil=diceEndAt+steps*STEP_MS+250; rollingUntil=uiHoldUntil;
+      renderCenter(); animateDice(S.roll);
+    }
+  }
+  if(Date.now()<uiHoldUntil){
+    clearTimeout(holdTimer);
+    holdTimer=setTimeout(()=>{ if(S && S.phase!=='lobby') renderGame(); }, uiHoldUntil-Date.now()+30);
+    return;
+  }
   // celdas: dueño, casas, hipoteca
   for(let i=0;i<40;i++){
     const el=$('#c'+i), o=S.props[i], sp=B[i];
@@ -991,8 +1112,6 @@ function renderGame(){
       band.innerHTML = h===5 ? '<span class="hh"></span>' : '<span class="hs"></span>'.repeat(h); }
   }
   renderTokens();
-  // dados
-  if(S.rollId!==shownRoll){ if(shownRoll!==-1){ rollingUntil=Date.now()+650; beep(220,.08,.06); setTimeout(()=>renderCenter(),700); } shownRoll=S.rollId; }
   // tarjeta
   if(S.card && S.card.id!==shownCard){ if(shownCard!==-1) showCard(S.card); shownCard=S.card.id; }
   if(shownCard===-1) shownCard=S.card?S.card.id:0;
@@ -1004,11 +1123,13 @@ function renderGame(){
 
 function renderCenter(){
   const c=$('#center'); if(!c) return;
-  const rolling=Date.now()<rollingUntil;
+  const animating=Date.now()<diceEndAt+60, busy=Date.now()<uiHoldUntil;
   const r=S.roll||[1,1];
-  const d = rolling ? [rnd6(),rnd6()] : r;
-  let h=`<div class="clogo">BANQUERO<small>PARAGUAYO</small></div><div class="dice">${dieHTML(d[0],rolling)}${dieHTML(d[1],rolling)}</div>`;
-  if(rolling){ c.innerHTML=h+'<div class="status">Tirando los dados…</div>'; setTimeout(()=>{ if(Date.now()<rollingUntil) renderCenter(); },120); return; }
+  let h=`<div class="clogo">BANQUERO<small>PARAGUAYO</small></div><div class="dice" id="diceSpot" style="visibility:${animating?'hidden':'visible'}">${dieHTML(r[0])}${dieHTML(r[1])}</div>`;
+  if(busy){
+    c.innerHTML=h+`<div class="status">${animating?'🎲 Tirando los dados…':`${r[0]} + ${r[1]} = ${r[0]+r[1]}${r[0]===r[1]?' · ¡Dobles!':''} — avanzando…`}</div>`;
+    return;
+  }
   if(S.phase==='over'){
     const w=P(S.winner);
     h+=`<div class="status" style="font-size:1.4em">🏆 ¡${esc(w.emoji+' '+w.name)} ganó!</div><div>Es el gran Banquero del Paraguay.</div>`;
@@ -1056,14 +1177,35 @@ function renderCenter(){
   c.innerHTML=h;
 }
 
+const prevMoney={}; let prevWallet={pid:null, bills:null};
+function renderWallet(){
+  const pid=meId(), p=pid&&P(pid); const w=$('#wallet');
+  if(!p || p.bk){ w.innerHTML=''; w.style.display='none'; return; }
+  w.style.display='block';
+  w.innerHTML=`<h4><span>💵 ${NET.mode==='local'?'Billetes de '+esc(p.name):'Tus billetes'}</span><span>${fmt(p.money)}</span></h4>${walletHTML(p)}`;
+  const now=billsOf(p.money);
+  if(prevWallet.pid===pid && prevWallet.bills) w.querySelectorAll('.bill').forEach(el=>{ if(now[el.dataset.v]!==prevWallet.bills[el.dataset.v]) el.classList.add('pop'); });
+  prevWallet={pid, bills:now};
+}
 function renderPlayers(){
   $('#players').innerHTML=S.players.map(p=>{
     const n=Object.values(S.props).filter(o=>o.o===p.id).length;
-    return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
+    return `<div class="pl ${S.phase==='play'&&cur().id===p.id?'turn':''} ${p.bk?'bk':''}" data-pid="${p.id}" style="border-left-color:${p.color}" onclick="showPlayer('${p.id}')">
       <span class="em">${p.emoji}</span>
       <span class="nm2">${p.bot?'🤖 ':''}${esc(p.name)}${p.id===NET.myPid&&NET.mode!=='local'?' (vos)':''}<br><span class="muted">${n} prop.${p.jail?' · 🚔 preso':''}${p.jcards.length?' · 🎫':''}${p.mic?' · 🎤':''}${!p.conn&&NET.mode!=='local'?' · ⚠️ desconectado':''}${p.bk?' · en quiebra':''}</span></span>
       <span class="mo ${p.money<0?'neg':''}">${fmt(p.money)}</span></div>`;
   }).join('');
+  // cartelito +/− cuando cambia la plata
+  for(const p of S.players){
+    const before=prevMoney[p.id]; prevMoney[p.id]=p.money;
+    if(before==null || before===p.money) continue;
+    const row=$(`.pl[data-pid="${p.id}"]`); if(!row) continue;
+    const d=p.money-before, el=document.createElement('span');
+    el.className='delta '+(d>0?'up':'down'); el.textContent=(d>0?'+':'−')+fmt(Math.abs(d)).replace('₲ ','₲');
+    row.appendChild(el);
+    if(canAct(p.id) && NET.mode!=='local') beep(d>0?1320:330,.08,.05);
+  }
+  renderWallet();
 }
 function tradeDesc(t){
   const A=P(t.from), Bp=P(t.to);
@@ -1149,7 +1291,7 @@ function showMyProps(refresh){
   if(refresh && $('#modalRoot').dataset.kind!=='props') return;
   const pid=meId(); if(!pid || S.phase!=='play'){ return; }
   const p=P(pid), list=ownedList(pid);
-  let h=`<h3>🏠 Propiedades de ${esc(p.emoji+' '+p.name)}</h3><p>Dinero: <b style="color:${p.money<0?'var(--red)':'inherit'}">${fmt(p.money)}</b>${p.jcards.length?` · 🎫 ${p.jcards.length} tarjeta(s) “Salga libre”`:''}</p>`;
+  let h=`<h3>🏠 Propiedades de ${esc(p.emoji+' '+p.name)}</h3><p>Dinero: <b style="color:${p.money<0?'var(--red)':'inherit'}">${fmt(p.money)}</b>${p.jcards.length?` · 🎫 ${p.jcards.length} tarjeta(s) “Salga libre”`:''}</p>${walletHTML(p)}<div style="height:10px"></div>`;
   if(!list.length) h+='<p class="muted">Todavía no tenés propiedades.</p>';
   for(const i of list){
     const o=S.props[i], sp=B[i], b=[];
@@ -1168,7 +1310,7 @@ function showPlayer(pid){
   if(!S || S.phase==='lobby') return;
   if(pid===meId()) return showMyProps();
   const p=P(pid), list=ownedList(pid);
-  let h=`<h3>${p.emoji} ${esc(p.name)}</h3><p>Dinero: <b>${fmt(p.money)}</b>${p.jcards.length?' · 🎫 Salga libre':''}</p>`;
+  let h=`<h3>${p.emoji} ${esc(p.name)}</h3><p>Dinero: <b>${fmt(p.money)}</b>${p.jcards.length?' · 🎫 Salga libre':''}</p>${walletHTML(p)}<h4 style="margin:14px 0 4px">Propiedades</h4>`;
   h+=list.length?list.map(i=>`<div class="prow"><span class="sw" style="background:${B[i].g?GROUPS[B[i].g].c:'#999'}"></span><span class="pn">${B[i].ic||''} ${B[i].n}</span><span class="muted">${S.props[i].m?'Hipotecada':S.props[i].h===5?'Hotel':S.props[i].h?S.props[i].h+' casa(s)':''}</span></div>`).join(''):'<p class="muted">Sin propiedades.</p>';
   if(!p.bk && S.phase==='play') h+=`<button class="btn gold wide" style="margin-top:8px" onclick="showTrade('${pid}')">🤝 Negociar con ${esc(p.name)}</button>`;
   modal(h,'player');
